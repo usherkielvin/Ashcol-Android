@@ -412,40 +412,39 @@ public class ServiceSelectActivity extends AppCompatActivity {
             return;
         }
 
-        String token = tokenManager.getToken();
-        if (token == null || token.trim().isEmpty()) {
+        String email = tokenManager.getEmail();
+        if (email == null || email.trim().isEmpty()) {
             return;
         }
 
-        String authToken = token.startsWith("Bearer ") ? token : "Bearer " + token;
-        ApiService apiService = ApiClient.getApiService();
-        Call<UserResponse> call = apiService.getUser(authToken);
-        call.enqueue(new Callback<UserResponse>() {
-            @Override
-            public void onResponse(Call<UserResponse> call, Response<UserResponse> response) {
-                if (isFinishing()) return;
+        com.google.firebase.auth.FirebaseAuth auth = com.google.firebase.auth.FirebaseAuth.getInstance();
+        com.google.firebase.auth.FirebaseUser user = auth.getCurrentUser();
 
-                if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
-                    UserResponse.Data data = response.body().getData();
-                    if (data != null && data.getPhone() != null) {
-                        String phone = data.getPhone().trim();
-                        if (!phone.isEmpty() && contactInput != null) {
+        if (user == null) {
+            return;
+        }
+
+        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(user.getUid())
+                .get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    if (isFinishing()) return;
+                    if (documentSnapshot.exists()) {
+                        String phone = documentSnapshot.getString("phone");
+                        if (phone != null && !phone.trim().isEmpty() && contactInput != null) {
                             String current = contactInput.getText() != null
                                     ? contactInput.getText().toString().trim()
                                     : "";
                             if (current.isEmpty()) {
-                                contactInput.setText(phone);
+                                contactInput.setText(phone.trim());
                             }
                         }
                     }
-                }
-            }
-
-            @Override
-            public void onFailure(Call<UserResponse> call, Throwable t) {
-                // Ignore prefill failures.
-            }
-        });
+                })
+                .addOnFailureListener(e -> {
+                    // Ignore prefill failures.
+                });
     }
 
     private void updatePresetAmount() {
@@ -763,220 +762,111 @@ public class ServiceSelectActivity extends AppCompatActivity {
 
         double amount = getTotalAmount();
 
-        ApiService apiService = ApiClient.getApiService();
-        String token = tokenManager.getToken();
+        String userEmail = tokenManager.getEmail();
 
-        if (token == null || token.isEmpty()) {
+        if (userEmail == null || userEmail.isEmpty()) {
             Toast.makeText(this, "You are not logged in.", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        String authToken = token.startsWith("Bearer ") ? token : "Bearer " + token;
 
         Log.d(TAG, "Creating ticket with: Lat=" + selectedLatitude + ", Lng=" + selectedLongitude);
 
         submitButton.setEnabled(false);
         submitButton.setText("Creating...");
 
+        String newTicketId = "TKT-" + System.currentTimeMillis();
+        Map<String, Object> ticketData = new HashMap<>();
+        ticketData.put("ticketId", newTicketId);
+        ticketData.put("title", fullName);
+        ticketData.put("description", fullDescription);
+        ticketData.put("service_type", selectedServiceType);
+        ticketData.put("location", fullAddress);
+        ticketData.put("contact", contact);
+        ticketData.put("preferred_date", preferredDate);
+        ticketData.put("latitude", selectedLatitude != 0.0 ? selectedLatitude : null);
+        ticketData.put("longitude", selectedLongitude != 0.0 ? selectedLongitude : null);
+        ticketData.put("amount", amount);
+        ticketData.put("status", "pending");
+        ticketData.put("customer_email", userEmail);
+        ticketData.put("created_at", System.currentTimeMillis());
+        ticketData.put("updated_at", System.currentTimeMillis());
+
         // Check if we have any images to upload
         if (selectedImageUri1 != null || selectedImageUri2 != null) {
-            createTicketWithImage(apiService, authToken, fullName, fullDescription, selectedServiceType, 
-                fullAddress, contact, preferredDate, amount);
+            uploadImagesAndSaveTicket(newTicketId, ticketData);
         } else {
-            createTicketWithoutImage(apiService, authToken, fullName, fullDescription, selectedServiceType, 
-                fullAddress, contact, preferredDate, amount);
+            saveTicketToFirestore(newTicketId, ticketData);
         }
     }
 
-    private void createTicketWithoutImage(ApiService apiService, String authToken, String fullName, 
-            String fullDescription, String serviceType, String fullAddress, String contact, String preferredDate,
-            double amount) {
-        
-        CreateTicketRequest request = new CreateTicketRequest(
-                fullName, 
-                fullDescription, 
-                serviceType, 
-                fullAddress, 
-                contact,
-                preferredDate, 
-                selectedLatitude != 0.0 ? selectedLatitude : null,
-            selectedLongitude != 0.0 ? selectedLongitude : null,
-            amount
-        );
-
-        Call<CreateTicketResponse> call = apiService.createTicket(authToken, request);
-        call.enqueue(new Callback<CreateTicketResponse>() {
-            @Override
-            public void onResponse(Call<CreateTicketResponse> call, Response<CreateTicketResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    pushTicketToFirestore(response.body());
-                }
-                handleTicketCreationResponse(response);
-            }
-
-            @Override
-            public void onFailure(Call<CreateTicketResponse> call, Throwable t) {
-                handleTicketCreationFailure(t);
-            }
-        });
-    }
-
-    private void createTicketWithImage(ApiService apiService, String authToken, String fullName, 
-            String fullDescription, String serviceType, String fullAddress, String contact, String preferredDate,
-            double amount) {
-        
-        try {
-            // Use the first available image (prioritize image 1)
-            Uri imageToUpload = selectedImageUri1 != null ? selectedImageUri1 : selectedImageUri2;
-            
-            if (imageToUpload == null) {
-                // Fallback to no image
-                createTicketWithoutImage(apiService, authToken, fullName, fullDescription, serviceType, fullAddress,
-                    contact, preferredDate, amount);
-                return;
-            }
-            
-            // Get the file from URI
-            InputStream inputStream = getContentResolver().openInputStream(imageToUpload);
-            if (inputStream == null) {
-                Toast.makeText(this, "Failed to read image file", Toast.LENGTH_SHORT).show();
-                submitButton.setEnabled(true);
-                submitButton.setText("Submit");
-                return;
-            }
-
-            // Get the actual MIME type from the content resolver
-            String mimeType = getContentResolver().getType(imageToUpload);
-            if (mimeType == null) {
-                mimeType = "image/jpeg"; // Default fallback
-            }
-            
-            // Determine file extension
-            String extension = ".jpg";
-            if (mimeType.contains("png")) {
-                extension = ".png";
-            } else if (mimeType.contains("gif")) {
-                extension = ".gif";
-            }
-
-            // Create a temporary file with proper extension
-            File tempFile = new File(getCacheDir(), "upload_" + System.currentTimeMillis() + extension);
-            FileOutputStream outputStream = new FileOutputStream(tempFile);
-            
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-            }
-            
-            outputStream.close();
-            inputStream.close();
-
-            Log.d(TAG, "Image prepared: " + tempFile.getName() + ", size: " + tempFile.length() + " bytes, type: " + mimeType);
-
-            // Add note about second image if present
-            String finalDescription = fullDescription;
-            if (selectedImageUri1 != null && selectedImageUri2 != null) {
-                finalDescription += "\n\nNote: 2 images attached (only first image uploaded due to API limitation)";
-            }
-
-            // Create RequestBody instances
-            RequestBody titleBody = RequestBody.create(MediaType.parse("text/plain"), fullName);
-            RequestBody descriptionBody = RequestBody.create(MediaType.parse("text/plain"), finalDescription);
-            RequestBody addressBody = RequestBody.create(MediaType.parse("text/plain"), fullAddress);
-            RequestBody contactBody = RequestBody.create(MediaType.parse("text/plain"), contact);
-            RequestBody serviceTypeBody = RequestBody.create(MediaType.parse("text/plain"), serviceType);
-            RequestBody unitTypeBody = RequestBody.create(MediaType.parse("text/plain"), 
-                    getSelectedUnitTypesString());
-            RequestBody preferredDateBody = RequestBody.create(MediaType.parse("text/plain"), 
-                    preferredDate != null ? preferredDate : "");
-            RequestBody latitudeBody = RequestBody.create(MediaType.parse("text/plain"), 
-                    String.valueOf(selectedLatitude));
-            RequestBody longitudeBody = RequestBody.create(MediaType.parse("text/plain"), 
-                    String.valueOf(selectedLongitude));
-                RequestBody amountBody = RequestBody.create(MediaType.parse("text/plain"),
-                    String.valueOf(amount));
-
-            // Create image part with proper MIME type
-            RequestBody imageBody = RequestBody.create(MediaType.parse(mimeType), tempFile);
-            MultipartBody.Part imagePart = MultipartBody.Part.createFormData("image", tempFile.getName(), imageBody);
-
-            Log.d(TAG, "Sending ticket with image: title=" + fullName + ", service=" + serviceType);
-
-            // Make the API call
-            Call<CreateTicketResponse> call = apiService.createTicketWithImage(
-                    authToken, titleBody, descriptionBody, addressBody, contactBody, 
-                    serviceTypeBody, unitTypeBody, preferredDateBody, latitudeBody, longitudeBody, amountBody,
-                    imagePart);
-            
-            final File finalTempFile = tempFile;
-            call.enqueue(new Callback<CreateTicketResponse>() {
-                @Override
-                public void onResponse(Call<CreateTicketResponse> call, Response<CreateTicketResponse> response) {
-                    // Delete temp file
-                    if (finalTempFile.exists()) {
-                        finalTempFile.delete();
-                    }
-                    if (response.isSuccessful() && response.body() != null) {
-                        pushTicketToFirestore(response.body());
-                    }
-                    handleTicketCreationResponse(response);
-                }
-
-                @Override
-                public void onFailure(Call<CreateTicketResponse> call, Throwable t) {
-                    // Delete temp file
-                    if (finalTempFile.exists()) {
-                        finalTempFile.delete();
-                    }
-                    handleTicketCreationFailure(t);
-                }
-            });
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error preparing image upload", e);
-            Toast.makeText(this, "Error preparing image: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            submitButton.setEnabled(true);
-            submitButton.setText("Submit");
-        }
-    }
-
-
-    private void pushTicketToFirestore(CreateTicketResponse ticketResponse) {
-        if (ticketResponse == null) {
-            return;
-        }
-
-        CreateTicketResponse.TicketData ticketData = ticketResponse.getTicket();
-        if (ticketData == null) {
-            return;
-        }
-
-        String ticketId = ticketData.getTicketId();
-        String status = ticketResponse.getStatus();
-        if (status == null && ticketData.getStatus() != null) {
-            status = ticketData.getStatus().getName();
-        }
-
-        String branchName = null;
-        if (ticketData.getBranch() != null) {
-            branchName = ticketData.getBranch().getName();
-        }
-
-        if (ticketId == null || ticketId.trim().isEmpty() || branchName == null || branchName.trim().isEmpty()) {
-            return;
-        }
-
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("ticketId", ticketId);
-        payload.put("status", status != null ? status : "pending");
-        payload.put("branch", branchName);
-        payload.put("updatedAt", System.currentTimeMillis());
-
+    private void saveTicketToFirestore(String ticketId, Map<String, Object> ticketData) {
         FirebaseFirestore.getInstance()
                 .collection("tickets")
                 .document(ticketId)
-                .set(payload);
+                .set(ticketData)
+                .addOnSuccessListener(aVoid -> {
+                    submitButton.setEnabled(true);
+                    submitButton.setText("Submit");
+                    Toast.makeText(ServiceSelectActivity.this, "Ticket created successfully!", Toast.LENGTH_SHORT).show();
+
+                    // Navigate to confirmation screen
+                    Intent intent = new Intent(ServiceSelectActivity.this, TicketConfirmationActivity.class);
+                    intent.putExtra("ticket_id", ticketId);
+                    intent.putExtra("status", "pending");
+                    startActivity(intent);
+                    finish();
+                })
+                .addOnFailureListener(e -> {
+                    submitButton.setEnabled(true);
+                    submitButton.setText("Submit");
+                    Toast.makeText(ServiceSelectActivity.this, "Network error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    Log.e(TAG, "Error saving ticket to Firestore", e);
+                });
+    }
+
+    private void uploadImagesAndSaveTicket(String ticketId, Map<String, Object> ticketData) {
+        java.util.List<Uri> urisToUpload = new java.util.ArrayList<>();
+        if (selectedImageUri1 != null) urisToUpload.add(selectedImageUri1);
+        if (selectedImageUri2 != null) urisToUpload.add(selectedImageUri2);
+
+        java.util.List<String> downloadUrls = new java.util.ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger uploadCount = new java.util.concurrent.atomic.AtomicInteger();
+        boolean[] hasFailed = new boolean[1];
+
+        com.google.firebase.storage.FirebaseStorage storage = com.google.firebase.storage.FirebaseStorage.getInstance();
+
+        for (int i = 0; i < urisToUpload.size(); i++) {
+            Uri imageUri = urisToUpload.get(i);
+            String fileName = "image_" + System.currentTimeMillis() + "_" + i + ".jpg";
+            com.google.firebase.storage.StorageReference ref = storage.getReference()
+                    .child("tickets/" + ticketId + "/" + fileName);
+
+            ref.putFile(imageUri)
+                    .addOnSuccessListener(taskSnapshot -> {
+                        ref.getDownloadUrl().addOnSuccessListener(uri -> {
+                            downloadUrls.add(uri.toString());
+                            if (uploadCount.incrementAndGet() == urisToUpload.size() && !hasFailed[0]) {
+                                ticketData.put("images", downloadUrls);
+                                saveTicketToFirestore(ticketId, ticketData);
+                            }
+                        }).addOnFailureListener(e -> {
+                            if (!hasFailed[0]) {
+                                hasFailed[0] = true;
+                                submitButton.setEnabled(true);
+                                submitButton.setText("Submit");
+                                Toast.makeText(this, "Failed to get image URL: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    })
+                    .addOnFailureListener(e -> {
+                        if (!hasFailed[0]) {
+                            hasFailed[0] = true;
+                            submitButton.setEnabled(true);
+                            submitButton.setText("Submit");
+                            Toast.makeText(this, "Failed to upload image: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        }
+                    });
+        }
     }
 
     private void handleTicketCreationResponse(Response<CreateTicketResponse> response) {

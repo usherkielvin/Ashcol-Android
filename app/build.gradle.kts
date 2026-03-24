@@ -67,6 +67,7 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.messaging)
     implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
 
     // Networking
     implementation(libs.retrofit)

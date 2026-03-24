@@ -258,40 +258,39 @@ public class UserCreateTicketFragment extends Fragment {
             return;
         }
 
-        String token = tokenManager.getToken();
-        if (token == null || token.trim().isEmpty()) {
+        String email = tokenManager.getEmail();
+        if (email == null || email.trim().isEmpty()) {
             return;
         }
 
-        String authToken = token.startsWith("Bearer ") ? token : "Bearer " + token;
-        ApiService apiService = ApiClient.getApiService();
-        Call<UserResponse> call = apiService.getUser(authToken);
-        call.enqueue(new Callback<UserResponse>() {
-            @Override
-            public void onResponse(@NonNull Call<UserResponse> call, @NonNull Response<UserResponse> response) {
-                if (!isAdded()) return;
+        com.google.firebase.auth.FirebaseAuth auth = com.google.firebase.auth.FirebaseAuth.getInstance();
+        com.google.firebase.auth.FirebaseUser user = auth.getCurrentUser();
 
-                if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
-                    UserResponse.Data data = response.body().getData();
-                    if (data != null && data.getPhone() != null) {
-                        String phone = data.getPhone().trim();
-                        if (!phone.isEmpty() && contactInput != null) {
+        if (user == null) {
+            return;
+        }
+
+        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(user.getUid())
+                .get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    if (!isAdded()) return;
+                    if (documentSnapshot.exists()) {
+                        String phone = documentSnapshot.getString("phone");
+                        if (phone != null && !phone.trim().isEmpty() && contactInput != null) {
                             String current = contactInput.getText() != null
                                     ? contactInput.getText().toString().trim()
                                     : "";
                             if (current.isEmpty()) {
-                                contactInput.setText(phone);
+                                contactInput.setText(phone.trim());
                             }
                         }
                     }
-                }
-            }
-
-            @Override
-            public void onFailure(@NonNull Call<UserResponse> call, @NonNull Throwable t) {
-                // Ignore prefill failures.
-            }
-        });
+                })
+                .addOnFailureListener(e -> {
+                    // Ignore prefill failures.
+                });
     }
 
     private void showDatePicker() {
@@ -404,36 +403,46 @@ public class UserCreateTicketFragment extends Fragment {
             fullDescription = "Unit Type: " + selectedUnitType + "\n" + description;
         }
 
-        CreateTicketRequest request = new CreateTicketRequest(fullName, fullDescription, selectedServiceType, fullAddress, contact,
-            preferredDate, selectedLatitude != 0.0 ? selectedLatitude : null,
-            selectedLongitude != 0.0 ? selectedLongitude : null, amount);
-        ApiService apiService = ApiClient.getApiService();
-        String token = tokenManager.getToken();
-
-        if (token == null) {
-            Toast.makeText(getContext(), "You are not logged in.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         submitButton.setEnabled(false);
         submitButton.setText("Creating...");
 
-        Call<CreateTicketResponse> call = apiService.createTicket("Bearer " + token, request);
-        call.enqueue(new Callback<CreateTicketResponse>() {
-            @Override
-            public void onResponse(Call<CreateTicketResponse> call, Response<CreateTicketResponse> response) {
-                submitButton.setEnabled(true);
-                submitButton.setText("Submit");
+        String userEmail = tokenManager.getEmail();
+        if (userEmail == null || userEmail.isEmpty()) {
+            Toast.makeText(getContext(), "User email not found.", Toast.LENGTH_SHORT).show();
+            submitButton.setEnabled(true);
+            submitButton.setText("Submit");
+            return;
+        }
 
-                if (response.isSuccessful() && response.body() != null) {
-                    CreateTicketResponse ticketResponse = response.body();
+        Map<String, Object> ticketData = new HashMap<>();
+        String newTicketId = "TKT-" + System.currentTimeMillis();
+        ticketData.put("ticketId", newTicketId);
+        ticketData.put("title", fullName);
+        ticketData.put("description", fullDescription);
+        ticketData.put("service_type", selectedServiceType);
+        ticketData.put("location", fullAddress);
+        ticketData.put("contact", contact);
+        ticketData.put("preferred_date", preferredDate);
+        ticketData.put("latitude", selectedLatitude != 0.0 ? selectedLatitude : null);
+        ticketData.put("longitude", selectedLongitude != 0.0 ? selectedLongitude : null);
+        ticketData.put("amount", amount);
+        ticketData.put("status", "pending");
+        ticketData.put("customer_email", userEmail);
+        ticketData.put("created_at", System.currentTimeMillis());
+        ticketData.put("updated_at", System.currentTimeMillis());
 
-                    pushTicketToFirestore(ticketResponse);
+        FirebaseFirestore.getInstance()
+                .collection("tickets")
+                .document(newTicketId)
+                .set(ticketData)
+                .addOnSuccessListener(aVoid -> {
+                    submitButton.setEnabled(true);
+                    submitButton.setText("Submit");
 
                     // Navigate to confirmation screen
                     Intent intent = new Intent(getActivity(), TicketConfirmationActivity.class);
-                    intent.putExtra("ticket_id", ticketResponse.getTicketId());
-                    intent.putExtra("status", ticketResponse.getStatus());
+                    intent.putExtra("ticket_id", newTicketId);
+                    intent.putExtra("status", "pending");
                     startActivity(intent);
 
                     if (getActivity() != null) {
@@ -441,22 +450,14 @@ public class UserCreateTicketFragment extends Fragment {
                     }
 
                     clearForm();
-
                     Toast.makeText(getContext(), "Ticket created successfully!", Toast.LENGTH_SHORT).show();
-                } else {
-                    Toast.makeText(getContext(), "Failed to create ticket. Please try again.", Toast.LENGTH_SHORT)
-                            .show();
-                }
-            }
-
-            @Override
-            public void onFailure(Call<CreateTicketResponse> call, Throwable t) {
-                submitButton.setEnabled(true);
-                submitButton.setText("Submit");
-
-                Toast.makeText(getContext(), "Network error: " + t.getMessage(), Toast.LENGTH_SHORT).show();
-            }
-        });
+                })
+                .addOnFailureListener(e -> {
+                    submitButton.setEnabled(true);
+                    submitButton.setText("Submit");
+                    Toast.makeText(getContext(), "Failed to create ticket: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                    Log.e(TAG, "Error creating ticket in Firestore", e);
+                });
     }
 
 

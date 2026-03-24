@@ -38,6 +38,14 @@
           }
         },
         {
+          "client_id": "927228841081-ualecebi1s8h608gf2bbpv82uhu5lfmt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "app.hub",
+            "certificate_hash": "fac50a365e71b0c31cd04c4901205d6a3f9a1aec"
+          }
+        },
+        {
           "client_id": "927228841081-p3q144ul75esbuagua8vvjdbsa1mroa2.apps.googleusercontent.com",
           "client_type": 3
         }

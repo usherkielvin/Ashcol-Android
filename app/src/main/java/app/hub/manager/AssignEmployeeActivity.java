@@ -254,74 +254,30 @@ public class AssignEmployeeActivity extends AppCompatActivity {
     }
 
     private void loadEmployees() {
-        String token = tokenManager.getToken();
-        if (token == null) {
-            Toast.makeText(this, "You are not logged in.", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
-        }
+        employees.clear();
+        employees.addAll(ManagerDataManager.getCachedEmployees());
 
-        ApiService apiService = ApiClient.getApiService();
-        Call<EmployeeResponse> call = apiService.getEmployees("Bearer " + token);
+        android.util.Log.d("AssignEmployee", "Loaded " + employees.size() + " technicians from cache");
 
-        call.enqueue(new Callback<EmployeeResponse>() {
-            @Override
-            public void onResponse(Call<EmployeeResponse> call, Response<EmployeeResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    EmployeeResponse employeeResponse = response.body();
-                    if (employeeResponse.isSuccess()) {
-                        employees.clear();
+        technicianAdapter = new TechnicianAdapter(AssignEmployeeActivity.this, employees);
+        actvEmployee.setAdapter(technicianAdapter);
 
-                        for (EmployeeResponse.Employee employee : employeeResponse.getEmployees()) {
-                            employees.add(employee);
-                        }
-
-                        android.util.Log.d("AssignEmployee", "Loaded " + employees.size() + " technicians");
-
-                        // Use custom adapter with status display
-                        technicianAdapter = new TechnicianAdapter(AssignEmployeeActivity.this, employees);
-                        actvEmployee.setAdapter(technicianAdapter);
-
-                        // Set threshold to 0 to show all items immediately
-                        actvEmployee.setThreshold(0);
-                        
-                        // Force dropdown to show when clicked
-                        actvEmployee.setOnClickListener(v -> {
-                            actvEmployee.setText("");
-                            actvEmployee.showDropDown();
-                        });
-                        
-                        // Also show dropdown on focus
-                        actvEmployee.setOnFocusChangeListener((v, hasFocus) -> {
-                            if (hasFocus) {
-                                actvEmployee.showDropDown();
-                            }
-                        });
-
-                        // Show a message if no technicians found
-                        if (employees.isEmpty()) {
-                            Toast.makeText(AssignEmployeeActivity.this, "No technicians available for assignment",
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    } else {
-                        android.util.Log.e("AssignEmployee",
-                                "API returned success=false: " + employeeResponse.getMessage());
-                        Toast.makeText(AssignEmployeeActivity.this,
-                            "Failed to load technicians: " + employeeResponse.getMessage(), Toast.LENGTH_SHORT)
-                                .show();
-                    }
-                } else {
-                    android.util.Log.e("AssignEmployee", "API response not successful. Code: " + response.code());
-                    Toast.makeText(AssignEmployeeActivity.this, "Failed to load technicians. Please try again.",
-                            Toast.LENGTH_SHORT).show();
-                }
-            }
-
-            @Override
-            public void onFailure(Call<EmployeeResponse> call, Throwable t) {
-                Toast.makeText(AssignEmployeeActivity.this, "Failed to load technicians", Toast.LENGTH_SHORT).show();
+        actvEmployee.setThreshold(0);
+        
+        actvEmployee.setOnClickListener(v -> {
+            actvEmployee.setText("");
+            actvEmployee.showDropDown();
+        });
+        
+        actvEmployee.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                actvEmployee.showDropDown();
             }
         });
+
+        if (employees.isEmpty()) {
+            Toast.makeText(AssignEmployeeActivity.this, "No technicians available for assignment", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showTimePicker() {
@@ -392,119 +348,50 @@ public class AssignEmployeeActivity extends AppCompatActivity {
         progressBar.setVisibility(View.VISIBLE);
         btnAssign.setEnabled(false);
 
-        String token = tokenManager.getToken();
-        if (token == null) {
-            Toast.makeText(this, "You are not logged in.", Toast.LENGTH_SHORT).show();
-            return;
+        // Find employee name for ticket record
+        String assignedStaffName = "Unknown Technician";
+        for (EmployeeResponse.Employee emp : employees) {
+            if (emp.getId() == selectedEmployeeId) {
+                assignedStaffName = (emp.getFirstName() != null ? emp.getFirstName() : "") + " " + (emp.getLastName() != null ? emp.getLastName() : "");
+                if (assignedStaffName.trim().isEmpty() && emp.getEmail() != null) {
+                    assignedStaffName = emp.getEmail();
+                }
+                break;
+            }
         }
 
-        SetScheduleRequest request = new SetScheduleRequest();
-        request.setScheduledDate(selectedDate);
-        request.setScheduledTime(selectedTime);
-        request.setScheduleNotes(etNotes.getText().toString().trim());
-        request.setAssignedStaffId(selectedEmployeeId);
+        java.util.Map<String, Object> updates = new java.util.HashMap<>();
+        updates.put("scheduledDate", selectedDate);
+        updates.put("scheduledTime", selectedTime);
+        updates.put("scheduleNotes", etNotes.getText().toString().trim());
+        updates.put("assignedStaffId", String.valueOf(selectedEmployeeId));
+        updates.put("assignedStaff", assignedStaffName.trim());
+        updates.put("status", "ongoing");
+        updates.put("statusColor", "#2196F3");
+        updates.put("updated_at", String.valueOf(System.currentTimeMillis()));
 
-        // Log the request data for debugging
-        android.util.Log.d("AssignEmployee", "Sending schedule request:");
-        android.util.Log.d("AssignEmployee", "Ticket ID: " + ticketId);
-        android.util.Log.d("AssignEmployee", "Scheduled Date: " + selectedDate);
-        android.util.Log.d("AssignEmployee", "Scheduled Time: " + selectedTime);
-        android.util.Log.d("AssignEmployee", "Assigned Technician ID: " + selectedEmployeeId);
-        android.util.Log.d("AssignEmployee", "Schedule Notes: " + etNotes.getText().toString().trim());
-
-        ApiService apiService = ApiClient.getApiService();
-        Call<SetScheduleResponse> call = apiService.setTicketSchedule("Bearer " + token, ticketId, request);
-
-        call.enqueue(new Callback<SetScheduleResponse>() {
-            @Override
-            public void onResponse(Call<SetScheduleResponse> call, Response<SetScheduleResponse> response) {
+        com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("tickets").document(ticketId)
+            .update(updates)
+            .addOnSuccessListener(aVoid -> {
                 progressBar.setVisibility(View.GONE);
                 btnAssign.setEnabled(true);
+                
+                Toast.makeText(AssignEmployeeActivity.this, "Ticket assigned and scheduled successfully", Toast.LENGTH_SHORT).show();
+                ManagerDataManager.updateTicketAssignmentInCache(
+                        ticketId,
+                        "ongoing",
+                        (String)updates.get("assignedStaff"),
+                        selectedDate,
+                        selectedTime);
 
-                android.util.Log.d("AssignEmployee", "Schedule API response code: " + response.code());
-
-                if (response.isSuccessful() && response.body() != null) {
-                    SetScheduleResponse scheduleResponse = response.body();
-                    android.util.Log.d("AssignEmployee", "Schedule API success: " + scheduleResponse.isSuccess());
-                    android.util.Log.d("AssignEmployee", "Schedule API message: " + scheduleResponse.getMessage());
-
-                    if (scheduleResponse.isSuccess()) {
-                        Toast.makeText(AssignEmployeeActivity.this, "Ticket assigned and scheduled successfully",
-                                Toast.LENGTH_SHORT).show();
-                        String assignedStaff = scheduleResponse.getTicket() != null
-                            ? scheduleResponse.getTicket().getAssignedStaff()
-                            : null;
-                        ManagerDataManager.updateTicketAssignmentInCache(
-                            ticketId,
-                            "ongoing",
-                            assignedStaff,
-                            selectedDate,
-                            selectedTime);
-
-                        // Notify the calling activity that assignment was successful
-                        setResult(RESULT_OK);
-                        finish();
-                    } else {
-                        Toast.makeText(AssignEmployeeActivity.this, "API Error: " + scheduleResponse.getMessage(),
-                                Toast.LENGTH_LONG).show();
-                    }
-                } else {
-                    // Log the error response with detailed info
-                    String errorMessage = "Failed to assign ticket";
-                    try {
-                        if (response.errorBody() != null) {
-                            String errorBody = response.errorBody().string();
-                            android.util.Log.e("AssignEmployee",
-                                    "Schedule API error response (code " + response.code() + "): " + errorBody);
-
-                            // Try to parse JSON error message
-                            try {
-                                com.google.gson.JsonObject errorJson = new com.google.gson.Gson().fromJson(errorBody,
-                                        com.google.gson.JsonObject.class);
-                                if (errorJson.has("message")) {
-                                    errorMessage = errorJson.get("message").getAsString();
-                                }
-                            } catch (Exception parseEx) {
-                                // If JSON parsing fails, use raw error body (truncated)
-                                errorMessage = errorBody.length() > 100 ? errorBody.substring(0, 100) + "..."
-                                        : errorBody;
-                            }
-                        } else {
-                            android.util.Log.e("AssignEmployee",
-                                    "Schedule API error - no error body, code: " + response.code());
-                            switch (response.code()) {
-                                case 400:
-                                    errorMessage = "Invalid assignment data. Please check all fields.";
-                                    break;
-                                case 403:
-                                    errorMessage = "You don't have permission to assign tickets.";
-                                    break;
-                                case 404:
-                                    errorMessage = "Ticket or technician not found.";
-                                    break;
-                                case 500:
-                                    errorMessage = "Server error. Please try again later.";
-                                    break;
-                                default:
-                                    errorMessage = "Failed to assign ticket (Error " + response.code() + ")";
-                            }
-                        }
-                    } catch (Exception e) {
-                        android.util.Log.e("AssignEmployee", "Error reading error body", e);
-                        errorMessage = "Failed to assign ticket. Please try again.";
-                    }
-                    Toast.makeText(AssignEmployeeActivity.this, errorMessage, Toast.LENGTH_LONG).show();
-                }
-            }
-
-            @Override
-            public void onFailure(Call<SetScheduleResponse> call, Throwable t) {
+                setResult(RESULT_OK);
+                finish();
+            })
+            .addOnFailureListener(e -> {
                 progressBar.setVisibility(View.GONE);
                 btnAssign.setEnabled(true);
-                android.util.Log.e("AssignEmployee", "Schedule API network error", t);
-                Toast.makeText(AssignEmployeeActivity.this, "Network error: " + t.getMessage(), Toast.LENGTH_LONG)
-                        .show();
-            }
-        });
+                android.util.Log.e("AssignEmployee", "Failed to update ticket assignment", e);
+                Toast.makeText(AssignEmployeeActivity.this, "Assignment failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            });
     }
 }

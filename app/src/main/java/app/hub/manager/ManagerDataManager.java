@@ -186,294 +186,213 @@ public class ManagerDataManager {
             return;
         }
 
-        // Data is stale or not loaded, refresh from API
-        if (isCacheStale) {
-            Log.d(TAG, "Cache is stale, refreshing from API");
-        } else {
-            Log.d(TAG, "No cached data, loading from API");
-        }
-
         isLoading = true;
         if (callback != null && !activeCallbacks.contains(callback)) {
             activeCallbacks.add(callback);
         }
 
         TokenManager tokenManager = new TokenManager(context);
-        String token = tokenManager.getToken();
+        String email = tokenManager.getEmail();
 
-        if (token == null) {
+        if (email == null) {
             isLoading = false;
             notifyLoadError("Not authenticated");
             return;
         }
 
-        // Load components
-        loadEmployees(token, null);
-        loadTickets(token, null);
-        loadDashboardStats(token, null);
+        // Fetch Manager Profile from Firestore to determine their Branch
+        com.google.firebase.auth.FirebaseAuth auth = com.google.firebase.auth.FirebaseAuth.getInstance();
+        com.google.firebase.auth.FirebaseUser user = auth.getCurrentUser();
+        
+        if (user == null) {
+            isLoading = false;
+            notifyLoadError("Firebase User not found");
+            return;
+        }
+
+        com.google.firebase.firestore.FirebaseFirestore firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance();
+        firestore.collection("users").document(user.getUid()).get()
+            .addOnSuccessListener(documentSnapshot -> {
+                if (documentSnapshot.exists()) {
+                    cachedBranchName = documentSnapshot.getString("branch");
+                    if (cachedBranchName == null || cachedBranchName.trim().isEmpty()) {
+                        cachedBranchName = "No Branch Assigned";
+                    }
+                    
+                    Log.d(TAG, "Manager branch identified: " + cachedBranchName);
+                    
+                    // Now load components based on branch
+                    loadEmployees(cachedBranchName, null);
+                    loadTickets(cachedBranchName, null);
+                    loadDashboardStats(cachedBranchName, null);
+                } else {
+                    isLoading = false;
+                    notifyLoadError("Manager document not found in Firestore");
+                }
+            })
+            .addOnFailureListener(e -> {
+                isLoading = false;
+                notifyLoadError("Failed to fetch manager data: " + e.getMessage());
+            });
     }
 
-    private static void loadEmployees(String token, DataLoadCallback callback) {
-        ApiService apiService = ApiClient.getApiService();
-        Call<EmployeeResponse> call = apiService.getEmployees("Bearer " + token);
-
-        call.enqueue(new Callback<EmployeeResponse>() {
-            @Override
-            public void onResponse(Call<EmployeeResponse> call, Response<EmployeeResponse> response) {
-                Log.d(TAG, "Employees API response code: " + response.code());
-                
-                if (response.isSuccessful() && response.body() != null) {
-                    EmployeeResponse employeeResponse = response.body();
-
-                    if (employeeResponse.isSuccess()) {
-                        cachedBranchName = employeeResponse.getBranch() != null ? employeeResponse.getBranch()
-                                : "No Branch Assigned";
-                        cachedEmployees = employeeResponse.getEmployees() != null
-                                ? new ArrayList<>(employeeResponse.getEmployees())
-                                : new ArrayList<>();
-
-                        Log.d(TAG, "Technicians loaded: " + cachedEmployees.size() + " in branch: " + cachedBranchName);
-                        
-                        // Log profile photo URLs for debugging
-                        for (EmployeeResponse.Employee emp : cachedEmployees) {
-                            Log.d(TAG, "Employee: " + emp.getFirstName() + " " + emp.getLastName() + 
-                                  ", Profile Photo: " + emp.getProfilePhoto());
-                        }
-
-                        // Notify all registered listeners
-                        notifyEmployeeListeners();
-
-                        // Notify active callbacks
-                        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                            cb.onEmployeesLoaded(cachedBranchName, cachedEmployees);
-                        }
-                        if (callback != null) {
-                            callback.onEmployeesLoaded(cachedBranchName, cachedEmployees);
-                        }
-
-                        checkLoadComplete();
-                    } else {
-                        String errorMsg = employeeResponse.getMessage() != null ? employeeResponse.getMessage() : "Unknown error";
-                        Log.e(TAG, "Technician API returned success=false: " + errorMsg);
-                        // Don't show error toast - just use empty list
-                        cachedBranchName = "No Branch Assigned";
-                        cachedEmployees = new ArrayList<>();
-                        notifyEmployeeListeners();
-                        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                            cb.onEmployeesLoaded(cachedBranchName, cachedEmployees);
-                        }
-                        if (callback != null) {
-                            callback.onEmployeesLoaded(cachedBranchName, cachedEmployees);
-                        }
-                        checkLoadComplete();
-                    }
-                } else {
-                    Log.e(TAG, "Technician API response not successful - Code: " + response.code());
-                    try {
-                        if (response.errorBody() != null) {
-                            String errorBody = response.errorBody().string();
-                            Log.e(TAG, "Error body: " + errorBody);
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Could not read error body", e);
-                    }
-                    // Don't show error toast - just use empty list
-                    cachedBranchName = "No Branch Assigned";
-                    cachedEmployees = new ArrayList<>();
-                    notifyEmployeeListeners();
-                    for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                        cb.onEmployeesLoaded(cachedBranchName, cachedEmployees);
-                    }
-                    if (callback != null) {
-                        callback.onEmployeesLoaded(cachedBranchName, cachedEmployees);
-                    }
-                    checkLoadComplete();
-                }
-            }
-
-            @Override
-            public void onFailure(Call<EmployeeResponse> call, Throwable t) {
-                Log.e(TAG, "Technician API network error: " + t.getMessage(), t);
-                // Don't show error toast - just use empty list
-                cachedBranchName = "No Branch Assigned";
+    private static void loadEmployees(String branch, DataLoadCallback callback) {
+        if ("No Branch Assigned".equals(branch)) {
+            cachedEmployees = new ArrayList<>();
+            notifyEmployeeListeners();
+            for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) cb.onEmployeesLoaded(branch, cachedEmployees);
+            if (callback != null) callback.onEmployeesLoaded(branch, cachedEmployees);
+            checkLoadComplete();
+            return;
+        }
+        
+        com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users")
+            .whereEqualTo("branch", branch)
+            .whereEqualTo("role", "technician")
+            .get()
+            .addOnSuccessListener(queryDocumentSnapshots -> {
                 cachedEmployees = new ArrayList<>();
+                for (com.google.firebase.firestore.DocumentSnapshot doc : queryDocumentSnapshots) {
+                    EmployeeResponse.Employee emp = new EmployeeResponse.Employee();
+                    String uid = doc.getId();
+                    emp.setId(Math.abs(uid.hashCode()));
+                    emp.setFirstName(doc.getString("firstName"));
+                    emp.setLastName(doc.getString("lastName"));
+                    emp.setEmail(doc.getString("email"));
+                    emp.setProfilePhoto(doc.getString("profilePhoto"));
+                    // ticketCount could be added if maintained in user doc, or let adapter handle it
+                    cachedEmployees.add(emp);
+                }
+
+                Log.d(TAG, "Technicians loaded from Firebase: " + cachedEmployees.size());
                 notifyEmployeeListeners();
+
                 for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                    cb.onEmployeesLoaded(cachedBranchName, cachedEmployees);
+                    cb.onEmployeesLoaded(branch, cachedEmployees);
                 }
                 if (callback != null) {
-                    callback.onEmployeesLoaded(cachedBranchName, cachedEmployees);
+                    callback.onEmployeesLoaded(branch, cachedEmployees);
                 }
+
                 checkLoadComplete();
-            }
-        });
+            })
+            .addOnFailureListener(e -> {
+                Log.e(TAG, "Technician fetch failed: " + e.getMessage());
+                cachedEmployees = new ArrayList<>();
+                notifyEmployeeListeners();
+                for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) cb.onEmployeesLoaded(branch, cachedEmployees);
+                if (callback != null) callback.onEmployeesLoaded(branch, cachedEmployees);
+                checkLoadComplete();
+            });
     }
 
-    private static void loadTickets(String token, DataLoadCallback callback) {
-        ApiService apiService = ApiClient.getApiService();
-        Call<TicketListResponse> call = apiService.getManagerTickets("Bearer " + token);
-
-        call.enqueue(new Callback<TicketListResponse>() {
-            @Override
-            public void onResponse(Call<TicketListResponse> call, Response<TicketListResponse> response) {
-                Log.d(TAG, "Tickets API response code: " + response.code());
-                
-                if (response.isSuccessful() && response.body() != null) {
-                    TicketListResponse ticketResponse = response.body();
-
-                    if (ticketResponse.isSuccess()) {
-                        cachedTickets = new ArrayList<>(ticketResponse.getTickets());
-
-                        Log.d(TAG, "Tickets loaded: " + cachedTickets.size());
-
-                        notifyTicketListeners();
-
-                        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                            cb.onTicketsLoaded(cachedTickets);
-                        }
-                        if (callback != null) {
-                            callback.onTicketsLoaded(cachedTickets);
-                        }
-
-                        checkLoadComplete();
-                    } else {
-                        String errorMsg = ticketResponse.getMessage() != null ? ticketResponse.getMessage() : "Unknown error";
-                        Log.e(TAG, "Ticket API returned success=false: " + errorMsg);
-                        // Don't show error toast - just use empty list
-                        cachedTickets = new ArrayList<>();
-                        notifyTicketListeners();
-                        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                            cb.onTicketsLoaded(cachedTickets);
-                        }
-                        if (callback != null) {
-                            callback.onTicketsLoaded(cachedTickets);
-                        }
-                        checkLoadComplete();
-                    }
-                } else {
-                    Log.e(TAG, "Ticket API response not successful - Code: " + response.code());
-                    try {
-                        if (response.errorBody() != null) {
-                            String errorBody = response.errorBody().string();
-                            Log.e(TAG, "Error body: " + errorBody);
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Could not read error body", e);
-                    }
-                    // Don't show error toast - just use empty list
-                    cachedTickets = new ArrayList<>();
-                    notifyTicketListeners();
-                    for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                        cb.onTicketsLoaded(cachedTickets);
-                    }
-                    if (callback != null) {
-                        callback.onTicketsLoaded(cachedTickets);
-                    }
-                    checkLoadComplete();
-                }
-            }
-
-            @Override
-            public void onFailure(Call<TicketListResponse> call, Throwable t) {
-                Log.e(TAG, "Ticket API network error: " + t.getMessage(), t);
-                // Don't show error toast - just use empty list
+    private static void loadTickets(String branch, DataLoadCallback callback) {
+        com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("tickets")
+            .whereEqualTo("branch", branch)
+            .get()
+            .addOnSuccessListener(queryDocumentSnapshots -> {
                 cachedTickets = new ArrayList<>();
+                for (com.google.firebase.firestore.DocumentSnapshot doc : queryDocumentSnapshots) {
+                    TicketListResponse.TicketItem ticket = doc.toObject(TicketListResponse.TicketItem.class);
+                    if (ticket != null) {
+                        if (ticket.getTicketId() == null || ticket.getTicketId().isEmpty()) {
+                            ticket.setTicketId(doc.getId());
+                        }
+                        cachedTickets.add(ticket);
+                    }
+                }
+                
+                // Sort by descending created_at
+                java.util.Collections.sort(cachedTickets, (t1, t2) -> {
+                    String d1 = t1.getCreatedAt();
+                    String d2 = t2.getCreatedAt();
+                    if (d1 == null && d2 == null) return 0;
+                    if (d1 == null) return 1;
+                    if (d2 == null) return -1;
+                    return d2.compareTo(d1);
+                });
+
+                Log.d(TAG, "Tickets loaded from Firebase: " + cachedTickets.size());
                 notifyTicketListeners();
+
                 for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
                     cb.onTicketsLoaded(cachedTickets);
                 }
                 if (callback != null) {
                     callback.onTicketsLoaded(cachedTickets);
                 }
+
                 checkLoadComplete();
-            }
-        });
+            })
+            .addOnFailureListener(e -> {
+                Log.e(TAG, "Ticket fetch failed: " + e.getMessage());
+                cachedTickets = new ArrayList<>();
+                notifyTicketListeners();
+                for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) cb.onTicketsLoaded(cachedTickets);
+                if (callback != null) callback.onTicketsLoaded(cachedTickets);
+                checkLoadComplete();
+            });
     }
 
-    private static void loadDashboardStats(String token, DataLoadCallback callback) {
-        ApiService apiService = ApiClient.getApiService();
-        Call<DashboardStatsResponse> call = apiService.getManagerDashboard("Bearer " + token);
-
-        call.enqueue(new Callback<DashboardStatsResponse>() {
-            @Override
-            public void onResponse(Call<DashboardStatsResponse> call, Response<DashboardStatsResponse> response) {
-                Log.d(TAG, "Dashboard API response code: " + response.code());
-                
-                if (response.isSuccessful() && response.body() != null) {
-                    DashboardStatsResponse dashboardResponse = response.body();
-
-                    if (dashboardResponse.isSuccess()) {
-                        cachedDashboardStats = dashboardResponse.getStats();
-                        cachedRecentTickets = dashboardResponse.getRecentTickets();
-
-                        Log.d(TAG, "Dashboard stats loaded: Total tickets = " +
-                                (cachedDashboardStats != null ? cachedDashboardStats.getTotalTickets() : 0));
-
-                        notifyDashboardListeners();
-
-                        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                            cb.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                        }
-                        if (callback != null) {
-                            callback.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                        }
-
-                        checkLoadComplete();
-                    } else {
-                        String errorMsg = dashboardResponse.getMessage() != null ? dashboardResponse.getMessage() : "Unknown error";
-                        Log.e(TAG, "Dashboard API returned success=false: " + errorMsg);
-                        // Don't show error toast - just use empty data
-                        cachedDashboardStats = new DashboardStatsResponse.Stats();
-                        cachedRecentTickets = new ArrayList<>();
-                        notifyDashboardListeners();
-                        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                            cb.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                        }
-                        if (callback != null) {
-                            callback.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                        }
-                        checkLoadComplete();
-                    }
-                } else {
-                    Log.e(TAG, "Dashboard API response not successful - Code: " + response.code());
-                    try {
-                        if (response.errorBody() != null) {
-                            String errorBody = response.errorBody().string();
-                            Log.e(TAG, "Error body: " + errorBody);
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Could not read error body", e);
-                    }
-                    // Don't show error toast - just use empty data
-                    cachedDashboardStats = new DashboardStatsResponse.Stats();
-                    cachedRecentTickets = new ArrayList<>();
-                    notifyDashboardListeners();
-                    for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                        cb.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                    }
-                    if (callback != null) {
-                        callback.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                    }
-                    checkLoadComplete();
-                }
+    private static void loadDashboardStats(String branch, DataLoadCallback callback) {
+        if (cachedTickets == null) {
+            // Wait until tickets are loaded to compute stats
+            return;
+        }
+        
+        // Compute stats locally based on fetched cachedTickets
+        DashboardStatsResponse.Stats stats = new DashboardStatsResponse.Stats();
+        int total = cachedTickets.size();
+        int pending = 0;
+        int inProgress = 0;
+        int completed = 0;
+        
+        List<DashboardStatsResponse.RecentTicket> recent = new ArrayList<>();
+        
+        for (TicketListResponse.TicketItem ticket : cachedTickets) {
+            String status = ticket.getStatus() != null ? ticket.getStatus().toLowerCase() : "";
+            
+            if (status.equals("pending") || status.equals("open") || status.equals("scheduled")) {
+                pending++;
+            } else if (status.equals("in progress") || status.equals("in-progress") || status.contains("progress") || status.equals("active")) {
+                inProgress++;
+            } else if (status.equals("completed") || status.equals("closed") || status.equals("resolved") || status.equals("paid")) {
+                completed++;
             }
-
-            @Override
-            public void onFailure(Call<DashboardStatsResponse> call, Throwable t) {
-                Log.e(TAG, "Dashboard API network error: " + t.getMessage(), t);
-                // Don't show error toast - just use empty data
-                cachedDashboardStats = new DashboardStatsResponse.Stats();
-                cachedRecentTickets = new ArrayList<>();
-                notifyDashboardListeners();
-                for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
-                    cb.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                }
-                if (callback != null) {
-                    callback.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
-                }
-                checkLoadComplete();
+            
+            // Build recent ticket list max 5
+            if (recent.size() < 5) {
+                DashboardStatsResponse.RecentTicket rt = new DashboardStatsResponse.RecentTicket();
+                rt.setTicketId(ticket.getTicketId());
+                rt.setStatus(ticket.getStatus());
+                rt.setStatusColor(ticket.getStatusColor());
+                rt.setCustomerName(ticket.getCustomerName());
+                rt.setServiceType(ticket.getServiceType());
+                rt.setDescription(ticket.getDescription());
+                rt.setAddress(ticket.getAddress());
+                rt.setCreatedAt(ticket.getCreatedAt());
+                recent.add(rt);
             }
-        });
+        }
+        
+        stats.setTotalTickets(total);
+        stats.setPending(pending);
+        stats.setInProgress(inProgress);
+        stats.setCompleted(completed);
+        
+        cachedDashboardStats = stats;
+        cachedRecentTickets = recent;
+        
+        notifyDashboardListeners();
+
+        for (DataLoadCallback cb : new ArrayList<>(activeCallbacks)) {
+            cb.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
+        }
+        if (callback != null) {
+            callback.onDashboardStatsLoaded(cachedDashboardStats, cachedRecentTickets);
+        }
+
+        checkLoadComplete();
     }
 
     private static void checkLoadComplete() {
@@ -544,16 +463,10 @@ public class ManagerDataManager {
         lastLoadTime = 0; // Reset cache timer
         cachedEmployees = null; // Clear cache
         
-        TokenManager tokenManager = new TokenManager(context);
-        String token = tokenManager.getToken();
-        
-        if (token != null) {
-            loadEmployees(token, callback);
+        if (cachedBranchName != null) {
+            loadEmployees(cachedBranchName, callback);
         } else {
-            Log.e(TAG, "Cannot force refresh employees - no auth token");
-            if (callback != null) {
-                callback.onLoadError("No authentication token");
-            }
+            loadAllData(context, callback);
         }
     }
 
@@ -699,20 +612,20 @@ public class ManagerDataManager {
     public static void refreshEmployees(Context context, DataLoadCallback callback) {
         Log.d(TAG, "Refreshing employees data");
         clearEmployeeCache();
-        TokenManager tokenManager = new TokenManager(context);
-        String token = tokenManager.getToken();
-        if (token != null) {
+        if (cachedBranchName != null) {
             isLoading = true;
-            loadEmployees(token, callback);
+            loadEmployees(cachedBranchName, callback);
+        } else {
+            loadAllData(context, callback);
         }
     }
 
     public static void refreshTickets(Context context, DataLoadCallback callback) {
         clearTicketCache();
-        TokenManager tokenManager = new TokenManager(context);
-        String token = tokenManager.getToken();
-        if (token != null) {
-            loadTickets(token, callback);
+        if (cachedBranchName != null) {
+            loadTickets(cachedBranchName, callback);
+        } else {
+            loadAllData(context, callback);
         }
     }
 

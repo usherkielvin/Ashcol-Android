@@ -49,6 +49,7 @@ public class ManagerProfileFragment extends Fragment {
     private long lastProfileFetchMs = 0L;
 
     private TokenManager tokenManager;
+    private app.hub.common.FirebaseAuthManager authManager;
     private TextView tvName;
     private TextView tvUsername;
     private TextView tvManagerRole;
@@ -62,6 +63,7 @@ public class ManagerProfileFragment extends Fragment {
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         tokenManager = new TokenManager(requireContext());
+        authManager = new app.hub.common.FirebaseAuthManager(requireContext());
     }
 
     @Override
@@ -140,33 +142,34 @@ public class ManagerProfileFragment extends Fragment {
     }
 
     private void fetchUserData() {
-        String authToken = tokenManager.getAuthToken();
-        if (authToken == null) {
+        com.google.firebase.auth.FirebaseUser user = com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null) {
             return;
         }
 
         lastProfileFetchMs = System.currentTimeMillis();
 
-        ApiService apiService = ApiClient.getApiService();
-        Call<UserResponse> call = apiService.getUser(authToken);
-        call.enqueue(new Callback<UserResponse>() {
-            @Override
-            public void onResponse(@NonNull Call<UserResponse> call, @NonNull Response<UserResponse> response) {
-                if (!isAdded() || response.body() == null || !response.body().isSuccess()) {
+        com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users").document(user.getUid())
+            .get()
+            .addOnSuccessListener(documentSnapshot -> {
+                if (!isAdded() || !documentSnapshot.exists()) {
                     return;
                 }
 
-                UserResponse.Data data = response.body().getData();
-                if (data == null) {
-                    return;
+                String firstName = documentSnapshot.getString("firstName");
+                String lastName = documentSnapshot.getString("lastName");
+                String name = documentSnapshot.getString("name");
+                if (name == null || name.trim().isEmpty()) {
+                    name = (firstName != null ? firstName : "") + " " + (lastName != null ? lastName : "");
+                    name = name.trim();
                 }
 
-                String name = buildNameFromApi(data);
-                String email = data.getEmail();
-                String branch = data.getBranch();
+                String email = documentSnapshot.getString("email");
+                String branch = documentSnapshot.getString("branch");
+                String profilePhoto = documentSnapshot.getString("profilePhoto");
 
                 if (tvName != null) {
-                    tvName.setText(name != null && !name.isEmpty() ? name : "Manager");
+                    tvName.setText(!name.isEmpty() ? name : "Manager");
                 }
 
                 if (tvUsername != null) {
@@ -181,55 +184,29 @@ public class ManagerProfileFragment extends Fragment {
                     }
                 }
 
-                if (name != null && !name.isEmpty()) {
+                if (!name.isEmpty()) {
                     tokenManager.saveName(name);
                 }
                 if (email != null && !email.isEmpty()) {
                     tokenManager.saveEmail(email);
                 }
 
-                if (data.getProfilePhoto() != null && !data.getProfilePhoto().isEmpty()) {
-                    loadProfileImageFromUrl(data.getProfilePhoto());
+                if (profilePhoto != null && !profilePhoto.isEmpty()) {
+                    loadProfileImageFromUrl(profilePhoto);
                 } else {
                     if (imgProfile != null) {
                         imgProfile.setImageResource(R.mipmap.ic_launchericons_round);
                     }
                     clearCachedProfileImage();
                 }
-            }
-
-            @Override
-            public void onFailure(@NonNull Call<UserResponse> call, @NonNull Throwable t) {
+            })
+            .addOnFailureListener(e -> {
                 // Keep cached UI on failure.
-            }
-        });
+            });
     }
 
     private boolean shouldRefreshProfile() {
         return System.currentTimeMillis() - lastProfileFetchMs > PROFILE_REFRESH_INTERVAL_MS;
-    }
-
-    private String buildNameFromApi(UserResponse.Data data) {
-        String apiName = data.getName();
-        if (apiName != null && !apiName.trim().isEmpty()) {
-            return apiName.trim();
-        }
-
-        String firstName = data.getFirstName();
-        String lastName = data.getLastName();
-
-        StringBuilder builder = new StringBuilder();
-        if (firstName != null && !firstName.trim().isEmpty()) {
-            builder.append(firstName.trim());
-        }
-        if (lastName != null && !lastName.trim().isEmpty()) {
-            if (builder.length() > 0) {
-                builder.append(" ");
-            }
-            builder.append(lastName.trim());
-        }
-
-        return builder.length() > 0 ? builder.toString() : null;
     }
 
     private void loadProfileImage() {
@@ -705,36 +682,18 @@ public class ManagerProfileFragment extends Fragment {
         LoadingDialog loadingDialog = new LoadingDialog(requireContext());
         loadingDialog.show();
 
-        String authToken = tokenManager.getAuthToken();
-        if (authToken != null) {
-            ApiService apiService = ApiClient.getApiService();
-            Call<LogoutResponse> call = apiService.logout(authToken);
-            call.enqueue(new Callback<LogoutResponse>() {
-                @Override
-                public void onResponse(@NonNull Call<LogoutResponse> call, @NonNull Response<LogoutResponse> response) {
-                    // Dismiss loading dialog
-                    loadingDialog.dismiss();
-
-                    // Perform cleanup operations asynchronously
-                    performLogoutCleanup();
-                }
-
-                @Override
-                public void onFailure(@NonNull Call<LogoutResponse> call, @NonNull Throwable t) {
-                    // Dismiss loading dialog
-                    loadingDialog.dismiss();
-
-                    // Still perform cleanup even if API call fails
-                    performLogoutCleanup();
-                }
-            });
-        } else {
-            // Dismiss loading dialog
-            loadingDialog.dismiss();
-
-            // No token, just perform cleanup
-            performLogoutCleanup();
+        try {
+            if (authManager != null) {
+                authManager.signOut();
+            } else {
+                com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
+            }
+        } catch (Exception e) {
+            Log.e("ManagerProfileFragment", "Error signing out of Firebase: " + e.getMessage());
         }
+
+        loadingDialog.dismiss();
+        performLogoutCleanup();
     }
 
     private void performLogoutCleanup() {

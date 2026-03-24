@@ -177,6 +177,7 @@ public class CreateNewAccountFragment extends Fragment {
 				// Send success to parent activity
 				RegisterActivity activity = (RegisterActivity) getActivity();
 				if (activity != null) {
+					activity.setGoogleSignInAccount(account);
 					activity.handleGoogleSignInSuccess(email, givenName, familyName, displayName, idToken);
 				}
 			}

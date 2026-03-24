@@ -65,9 +65,12 @@ public class UserHomeFragment extends Fragment {
         return fragment;
     }
 
+    private app.hub.common.FirestoreManager firestoreManager;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        firestoreManager = new app.hub.common.FirestoreManager(requireContext());
     }
 
     @Override
@@ -77,6 +80,10 @@ public class UserHomeFragment extends Fragment {
         View view = inflater.inflate(R.layout.fragment_user__home, container, false);
 
         tokenManager = new TokenManager(requireContext());
+        if (firestoreManager == null) {
+            firestoreManager = new app.hub.common.FirestoreManager(requireContext());
+        }
+        
         bannerViewPager = view.findViewById(R.id.bannerViewPager);
         dotsLayout = view.findViewById(R.id.dotsLayout);
         tvAssignedBranch = view.findViewById(R.id.tvAssignedBranch);
@@ -168,8 +175,6 @@ public class UserHomeFragment extends Fragment {
         if (handler != null && slideRunnable != null) {
             handler.postDelayed(slideRunnable, 4000);
         }
-        // Refresh ticket counts when fragment becomes visible
-        loadTicketCounts();
     }
 
     @Override
@@ -177,6 +182,10 @@ public class UserHomeFragment extends Fragment {
         super.onDestroy();
         if (handler != null && slideRunnable != null) {
             handler.removeCallbacks(slideRunnable);
+        }
+        if (firestoreManager != null) {
+            firestoreManager.stopListening();
+            firestoreManager.stopTicketListening();
         }
     }
 
@@ -192,39 +201,27 @@ public class UserHomeFragment extends Fragment {
     }
 
     private void fetchUserData() {
-        String token = tokenManager.getToken();
-        if (token == null) {
-            Log.w(TAG, "No auth token available");
-            return;
-        }
-
-        ApiService apiService = ApiClient.getApiService();
-        Call<UserResponse> call = apiService.getUser(token);
-        call.enqueue(new Callback<UserResponse>() {
+        firestoreManager.listenToUserProfile(new app.hub.common.FirestoreManager.UserProfileListener() {
             @Override
-            public void onResponse(@NonNull Call<UserResponse> call, @NonNull Response<UserResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    UserResponse userResponse = response.body();
-                    if (userResponse.isSuccess() && userResponse.getData() != null) {
-                        UserResponse.Data userData = userResponse.getData();
-                        String location = buildLocationText(userData.getCity(), userData.getRegion());
-                        if (location == null || location.isEmpty()) {
-                            location = userData.getBranch();
-                        }
+            public void onProfileUpdated(UserResponse.Data profile) {
+                if (profile != null) {
+                    String location = buildLocationText(profile.getCity(), profile.getRegion());
+                    if (location == null || location.isEmpty()) {
+                        location = profile.getBranch();
+                    }
 
-                        if (location != null && !location.isEmpty()) {
+                    if (location != null && !location.isEmpty()) {
+                        if (getActivity() != null) {
                             tokenManager.saveCurrentCity(location);
                             displayLocation(location);
                         }
                     }
-                } else {
-                    Log.e(TAG, "Failed to fetch user data: " + response.code());
                 }
             }
 
             @Override
-            public void onFailure(@NonNull Call<UserResponse> call, @NonNull Throwable t) {
-                Log.e(TAG, "API call failed: " + t.getMessage());
+            public void onError(Exception e) {
+                Log.e(TAG, "Failed to fetch user data from Firestore: " + e.getMessage());
             }
         });
     }
@@ -281,30 +278,17 @@ public class UserHomeFragment extends Fragment {
     }
     
     private void loadTicketCounts() {
-        String token = tokenManager.getToken();
-        if (token == null) {
-            Log.w(TAG, "No auth token available for loading ticket counts");
-            return;
-        }
-
-        ApiService apiService = ApiClient.getApiService();
-        Call<TicketListResponse> call = apiService.getTickets(token);
-        call.enqueue(new Callback<TicketListResponse>() {
+        firestoreManager.listenToMyTickets(new app.hub.common.FirestoreManager.TicketListListener() {
             @Override
-            public void onResponse(@NonNull Call<TicketListResponse> call, @NonNull Response<TicketListResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    TicketListResponse ticketResponse = response.body();
-                    if (ticketResponse.isSuccess() && ticketResponse.getTickets() != null) {
-                        updateTicketCounts(ticketResponse.getTickets());
-                    }
-                } else {
-                    Log.e(TAG, "Failed to fetch tickets: " + response.code());
+            public void onTicketsUpdated(List<app.hub.api.TicketListResponse.TicketItem> tickets) {
+                if (tickets != null) {
+                    updateTicketCounts(tickets);
                 }
             }
 
             @Override
-            public void onFailure(@NonNull Call<TicketListResponse> call, @NonNull Throwable t) {
-                Log.e(TAG, "API call failed for tickets: " + t.getMessage());
+            public void onError(Exception e) {
+                Log.e(TAG, "Failed to fetch tickets from Firestore: " + e.getMessage());
             }
         });
     }

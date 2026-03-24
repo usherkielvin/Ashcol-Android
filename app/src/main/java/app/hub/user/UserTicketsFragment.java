@@ -298,104 +298,26 @@ public class UserTicketsFragment extends Fragment {
     }
 
     private void loadTickets(boolean silentRefresh) {
-        String token = tokenManager.getToken();
-        if (token == null) {
-            Log.e("UserTickets", "No token found - user not logged in");
+        String email = tokenManager.getEmail();
+        if (email == null) {
+            Log.e("UserTickets", "No user email found - user not logged in");
             if (swipeRefreshLayout != null) {
                 swipeRefreshLayout.setRefreshing(false);
             }
             return;
         }
 
-        Log.d(TAG, "Loading tickets for user");
-
-        ApiService apiService = ApiClient.getApiService();
-        Call<TicketListResponse> call = apiService.getTickets("Bearer " + token);
-
-        call.enqueue(new Callback<TicketListResponse>() {
-            @Override
-            public void onResponse(Call<TicketListResponse> call, Response<TicketListResponse> response) {
+        Log.d(TAG, "Firestore is automatically syncing tickets.");
+        
+        // Just stop the loading animation if swipe to refresh was used
+        if (swipeRefreshLayout != null) {
+            // Add a small delay for better UX
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                 if (swipeRefreshLayout != null) {
                     swipeRefreshLayout.setRefreshing(false);
                 }
-
-                Log.d(TAG, "API Response - Code: " + response.code());
-
-                if (response.isSuccessful() && response.body() != null) {
-                    TicketListResponse ticketResponse = response.body();
-
-                    if (ticketResponse.isSuccess()) {
-                        List<TicketListResponse.TicketItem> newTickets = ticketResponse.getTickets();
-                        int ticketCount = (newTickets != null) ? newTickets.size() : 0;
-                        Log.d(TAG, "Tickets received: " + ticketCount);
-
-                        // Merge new tickets with existing ones instead of clearing
-                        if (newTickets != null) {
-                            mergeTickets(newTickets);
-                        } else {
-                            // Only clear if explicitly empty/null response which implies no tickets
-                            if (allTickets != null)
-                                allTickets.clear();
-                            if (tickets != null)
-                                tickets.clear();
-                            if (adapter != null)
-                                adapter.notifyDataSetChanged();
-                        }
-
-                        // Filter is already called inside mergeTickets
-                        // filterTickets();
-
-                        // Adapter update is already called inside mergeTickets
-                        // if (adapter != null) {
-                        // adapter.notifyDataSetChanged();
-                        // }
-
-                        // No popups/toasts here – UI updates silently
-                    } else {
-                        String message = ticketResponse.getMessage();
-                        Log.e("UserTickets", "API returned success=false. Message: " + message);
-                    }
-                } else {
-                    Log.e("UserTickets", "Response not successful - Code: " + response.code());
-
-                    String errorMessage = "Failed to load tickets";
-                    if (response.errorBody() != null) {
-                        try {
-                            String errorBody = response.errorBody().string();
-                            Log.e("UserTickets", "Error body: " + errorBody);
-                            errorMessage = "Server error: " + errorBody;
-                        } catch (Exception e) {
-                            errorMessage = "Server error (Code: " + response.code() + ")";
-                        }
-                    }
-                    // Log only, no popup
-                    Log.e("UserTickets", errorMessage);
-                }
-            }
-
-            @Override
-            public void onFailure(Call<TicketListResponse> call, Throwable t) {
-                if (swipeRefreshLayout != null) {
-                    swipeRefreshLayout.setRefreshing(false);
-                }
-
-                Log.e("UserTickets", "Network error: " + t.getMessage(), t);
-
-                String errorMessage;
-                if (t instanceof java.net.ConnectException) {
-                    errorMessage = "Cannot connect to server. Please check your internet connection.";
-                } else if (t instanceof java.net.SocketTimeoutException) {
-                    errorMessage = "Request timed out. Please try again.";
-                } else if (t instanceof java.net.UnknownHostException) {
-                    errorMessage = "Cannot reach server. Please check your internet connection.";
-                } else {
-                    errorMessage = "Network error: " + t.getMessage();
-                }
-
-                // Log only, no popup
-                Log.e("UserTickets", errorMessage);
-            }
-        });
+            }, 500);
+        }
     }
 
     private void setupFilterTabs() {

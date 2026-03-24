@@ -65,6 +65,7 @@ public class UserProfileFragment extends Fragment {
 
     private TokenManager tokenManager;
     private FirestoreManager firestoreManager;
+    private app.hub.common.FirebaseAuthManager authManager;
 
     private String currentName;
     private String currentEmail;
@@ -93,6 +94,7 @@ public class UserProfileFragment extends Fragment {
 
         tokenManager = new TokenManager(requireContext());
         firestoreManager = new FirestoreManager(requireContext());
+        authManager = new app.hub.common.FirebaseAuthManager(requireContext());
         UiPreferences.applyTheme(tokenManager.getThemePreference());
         initializeViews(view);
         loadCachedData();
@@ -212,35 +214,7 @@ public class UserProfileFragment extends Fragment {
     }
 
     private void fetchUserData() {
-        String authToken = tokenManager.getAuthToken();
-        if (authToken == null) {
-            fallbackToCachedData();
-            return;
-        }
-
-        ApiService apiService = ApiClient.getApiService();
-        Call<UserResponse> call = apiService.getUser(authToken);
-        call.enqueue(new Callback<UserResponse>() {
-            @Override
-            public void onResponse(@NonNull Call<UserResponse> call, @NonNull Response<UserResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    UserResponse userResponse = response.body();
-                    if (userResponse.isSuccess() && userResponse.getData() != null) {
-                        UserResponse.Data userData = userResponse.getData();
-                        processUserData(userData);
-                    } else {
-                        fallbackToCachedData();
-                    }
-                } else {
-                    fallbackToCachedData();
-                }
-            }
-
-            @Override
-            public void onFailure(@NonNull Call<UserResponse> call, @NonNull Throwable t) {
-                fallbackToCachedData();
-            }
-        });
+        fallbackToCachedData();
     }
 
     private void processUserData(UserResponse.Data userData) {
@@ -581,36 +555,18 @@ public class UserProfileFragment extends Fragment {
         LoadingDialog loadingDialog = new LoadingDialog(requireContext());
         loadingDialog.show();
 
-        String authToken = tokenManager.getAuthToken();
-        if (authToken != null) {
-            ApiService apiService = ApiClient.getApiService();
-            Call<LogoutResponse> call = apiService.logout(authToken);
-            call.enqueue(new Callback<LogoutResponse>() {
-                @Override
-                public void onResponse(@NonNull Call<LogoutResponse> call, @NonNull Response<LogoutResponse> response) {
-                    // Dismiss loading dialog
-                    loadingDialog.dismiss();
-
-                    // Perform cleanup operations asynchronously
-                    performLogoutCleanup();
-                }
-
-                @Override
-                public void onFailure(@NonNull Call<LogoutResponse> call, @NonNull Throwable t) {
-                    // Dismiss loading dialog
-                    loadingDialog.dismiss();
-
-                    // Still perform cleanup even if API call fails
-                    performLogoutCleanup();
-                }
-            });
-        } else {
-            // Dismiss loading dialog
-            loadingDialog.dismiss();
-
-            // No token, just perform cleanup
-            performLogoutCleanup();
+        try {
+            if (authManager != null) {
+                authManager.signOut();
+            } else {
+                com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error signing out of Firebase: " + e.getMessage());
         }
+
+        loadingDialog.dismiss();
+        performLogoutCleanup();
     }
 
     private void performLogoutCleanup() {
@@ -850,58 +806,48 @@ public class UserProfileFragment extends Fragment {
     }
 
     private void uploadProfilePhotoToServer(Uri imageUri) {
-        String authToken = tokenManager.getAuthToken();
-        if (authToken == null) {
+        String email = tokenManager.getEmail();
+        if (email == null) {
             showToast("Not authenticated. Please login again.");
             return;
         }
 
+        com.google.firebase.auth.FirebaseAuth auth = com.google.firebase.auth.FirebaseAuth.getInstance();
+        com.google.firebase.auth.FirebaseUser user = auth.getCurrentUser();
+        
+        if (user == null) {
+            showToast("User not found.");
+            return;
+        }
+
         try {
-            // Create file from URI
-            File imageFile = createFileFromUri(imageUri);
-            if (imageFile == null || !imageFile.exists()) {
-                showToast("Error: Could not access image file");
-                return;
-            }
+            com.google.firebase.storage.FirebaseStorage storage = com.google.firebase.storage.FirebaseStorage.getInstance();
+            com.google.firebase.storage.StorageReference ref = storage.getReference()
+                    .child("profile_photos/" + user.getUid() + "/photo.jpg");
 
-            // Create request body for the file
-            RequestBody requestFile = RequestBody.create(
-                    MediaType.parse("image/*"),
-                    imageFile);
-
-            // Create multipart body part
-            MultipartBody.Part photoPart = MultipartBody.Part.createFormData(
-                    "photo",
-                    imageFile.getName(),
-                    requestFile);
-
-            // Make API call
-            ApiService apiService = ApiClient.getApiService();
-            Call<ProfilePhotoResponse> call = apiService.uploadProfilePhoto(authToken, photoPart);
-            call.enqueue(new Callback<ProfilePhotoResponse>() {
-                @Override
-                public void onResponse(@NonNull Call<ProfilePhotoResponse> call,
-                        @NonNull Response<ProfilePhotoResponse> response) {
-                    if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
-                        ProfilePhotoResponse photoResponse = response.body();
-                        if (photoResponse.getData() != null && photoResponse.getData().getProfilePhoto() != null) {
-                            // Photo uploaded successfully
-                            showToast("Profile photo saved");
-                            // Reload user data to get updated profile photo URL
-                            fetchUserData();
-                        } else {
-                            showToast("Photo uploaded but response incomplete");
-                        }
-                    } else {
-                        showToast("Failed to upload photo. Please try again.");
-                    }
-                }
-
-                @Override
-                public void onFailure(@NonNull Call<ProfilePhotoResponse> call, @NonNull Throwable t) {
-                    showToast("Failed to upload photo: " + t.getMessage());
-                }
-            });
+            ref.putFile(imageUri)
+                    .addOnSuccessListener(taskSnapshot -> {
+                        ref.getDownloadUrl().addOnSuccessListener(uri -> {
+                            String photoUrl = uri.toString();
+                            
+                            // Update Firestore
+                            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                    .collection("users")
+                                    .document(user.getUid())
+                                    .update("profilePhoto", photoUrl)
+                                    .addOnSuccessListener(aVoid -> {
+                                        showToast("Profile photo saved");
+                                    })
+                                    .addOnFailureListener(e -> {
+                                        showToast("Failed to update profile: " + e.getMessage());
+                                    });
+                        }).addOnFailureListener(e -> {
+                            showToast("Failed to get image URL: " + e.getMessage());
+                        });
+                    })
+                    .addOnFailureListener(e -> {
+                        showToast("Failed to upload photo: " + e.getMessage());
+                    });
         } catch (Exception e) {
             showToast("Error uploading photo: " + e.getMessage());
         }
@@ -963,20 +909,26 @@ public class UserProfileFragment extends Fragment {
     }
 
     private void deleteProfilePhoto() {
-        String authToken = tokenManager.getAuthToken();
-        if (authToken == null) {
+        String email = tokenManager.getEmail();
+        if (email == null) {
             showToast("Not authenticated. Please login again.");
             return;
         }
 
-        ApiService apiService = ApiClient.getApiService();
-        Call<ProfilePhotoResponse> call = apiService.deleteProfilePhoto(authToken);
-        call.enqueue(new Callback<ProfilePhotoResponse>() {
-            @Override
-            public void onResponse(@NonNull Call<ProfilePhotoResponse> call,
-                    @NonNull Response<ProfilePhotoResponse> response) {
-                if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
-                    // Photo deleted successfully
+        com.google.firebase.auth.FirebaseAuth auth = com.google.firebase.auth.FirebaseAuth.getInstance();
+        com.google.firebase.auth.FirebaseUser user = auth.getCurrentUser();
+        
+        if (user == null) {
+            showToast("User not found.");
+            return;
+        }
+
+        // Update Firestore to remove profilePhoto
+        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(user.getUid())
+                .update("profilePhoto", null)
+                .addOnSuccessListener(aVoid -> {
                     showToast("Profile photo removed");
 
                     // Clear local cache
@@ -997,19 +949,10 @@ public class UserProfileFragment extends Fragment {
                             }
                         });
                     }
-
-                    // Reload user data to get updated profile photo (should be null now)
-                    fetchUserData();
-                } else {
-                    showToast("Failed to remove photo. Please try again.");
-                }
-            }
-
-            @Override
-            public void onFailure(@NonNull Call<ProfilePhotoResponse> call, @NonNull Throwable t) {
-                showToast("Failed to remove photo: " + t.getMessage());
-            }
-        });
+                })
+                .addOnFailureListener(e -> {
+                    showToast("Failed to remove photo: " + e.getMessage());
+                });
     }
 
     private void navigateToChangePassword() {

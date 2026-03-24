@@ -10,5 +10,5 @@
     "java.import.gradle.java.home": "C:/Users/usher/.jdks/ms-21.0.9",
     "java.import.gradle.wrapper.enabled": true,
     "java.import.gradle.enabled": true,
-    "java.configuration.updateBuildConfiguration": "interactive"
+    "java.configuration.updateBuildConfiguration": "automatic"
 }

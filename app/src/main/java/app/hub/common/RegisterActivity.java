@@ -634,6 +634,11 @@ public class RegisterActivity extends AppCompatActivity {
 
 	// Store Google ID token
 	private String googleIdToken;
+	private com.google.android.gms.auth.api.signin.GoogleSignInAccount googleSignInAccount;
+
+	public void setGoogleSignInAccount(com.google.android.gms.auth.api.signin.GoogleSignInAccount account) {
+		this.googleSignInAccount = account;
+	}
 
 	// Check if user signed in with Google
 	public boolean isGoogleSignInUser() {
@@ -681,15 +686,12 @@ public class RegisterActivity extends AppCompatActivity {
 
 	// Register/login Google user
 	private void registerGoogleUser() {
-		// Ensure we have required data
 		String email = getUserEmail();
 		String firstName = getUserFirstName();
 		String lastName = getUserLastName();
 		String phone = getUserPhone();
 		String location = getUserLocation();
 
-		// Extract region and city from views directly if available, or try to parse
-		// from location string
 		String region = "";
 		String city = "";
 
@@ -698,7 +700,6 @@ public class RegisterActivity extends AppCompatActivity {
 			city = getText(cityInput);
 		}
 
-		// Fallback: if inputs are empty but we have a location string, try to split it
 		if ((region.isEmpty() || city.isEmpty()) && location != null && location.contains(",")) {
 			String[] parts = location.split(",", 2);
 			if (parts.length == 2) {
@@ -714,64 +715,50 @@ public class RegisterActivity extends AppCompatActivity {
 			return;
 		}
 
-		Log.d(TAG, "Registering Google user with backend - Email: " + email);
-		Log.d(TAG, "First Name: " + firstName + ", Last Name: " + lastName + ", Phone: " + phone);
-		Log.d(TAG, "Location: " + location + ", Region: " + region + ", City: " + city);
+		if (googleSignInAccount == null) {
+			Log.e(TAG, "Google Sign In Account is missing");
+			Toast.makeText(this, "Google Sign-In failed, please try again.", Toast.LENGTH_SHORT).show();
+			return;
+		}
 
-		// Now actually register the user with the backend using the REGISTRATION
-		// endpoint
-		ApiService apiService = ApiClient.getApiService();
-		String idToken = googleIdToken != null && !googleIdToken.isEmpty() ? googleIdToken : "";
-
-		// Use the updated constructor with location fields
-		GoogleSignInRequest request = new GoogleSignInRequest(
-				idToken,
-				email,
-				firstName != null ? firstName : "",
-				lastName != null ? lastName : "",
-				phone != null ? phone : "",
-				region,
-				city,
-				location != null ? location : "");
-
-		Log.d(TAG, "Sending Google registration request - Email: " + email + ", First: " + firstName + ", Last: "
-				+ lastName + ", Phone: " + phone);
-
-		// Use the REGISTRATION endpoint for new users
-		Call<GoogleSignInResponse> call = apiService.googleRegister(request);
-		call.enqueue(new Callback<>() {
-			@Override
-			public void onResponse(@NonNull Call<GoogleSignInResponse> call,
-					@NonNull Response<GoogleSignInResponse> response) {
-				if (response.isSuccessful() && response.body() != null && response.body().isSuccess()) {
-					handleGoogleRegistrationSuccess(response.body());
+		FirebaseAuthManager authManager = new FirebaseAuthManager(this);
+		authManager.signInWithGoogle(googleSignInAccount)
+			.addOnCompleteListener(this, task -> {
+				if (task.isSuccessful()) {
+					com.google.firebase.auth.FirebaseUser user = authManager.getCurrentUser();
+					String role = "customer";
+					
+					java.util.Map<String, Object> userMap = new java.util.HashMap<>();
+					userMap.put("email", email);
+					userMap.put("firstName", firstName);
+					userMap.put("lastName", lastName);
+					userMap.put("username", userName != null ? userName : "");
+					userMap.put("phone", phone != null ? phone : "");
+					userMap.put("location", location != null ? location : "");
+					userMap.put("role", role);
+					userMap.put("fcm_token", "");
+					
+					com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users")
+						.document(user.getUid())
+						.set(userMap, com.google.firebase.firestore.SetOptions.merge())
+						.addOnSuccessListener(aVoid -> {
+							tokenManager.saveEmail(email);
+							tokenManager.saveRole(role);
+							tokenManager.saveName(firstName + " " + lastName);
+							tokenManager.forceCommit();
+							
+							showAccountCreatedFragment();
+						})
+						.addOnFailureListener(e -> {
+							Log.e(TAG, "Failed to save Google user to Firestore", e);
+							Toast.makeText(this, "Failed to initialize profile.", Toast.LENGTH_LONG).show();
+						});
 				} else {
-					// HTTP 409 from backend means account already exists → send user to login
-					if (response.code() == 409) {
-						Log.w(TAG, "Google registration: account already exists, redirecting to login");
-						navigateToLoginFromGoogleConflict();
-						return;
-					}
-
-					// Log response body for debugging
-					String errorBody = "";
-					try {
-						if (response.errorBody() != null) {
-							errorBody = response.errorBody().string();
-							Log.e(TAG, "Google registration error response: " + errorBody);
-						}
-					} catch (Exception e) {
-						Log.e(TAG, "Error reading error response", e);
-					}
-					handleGoogleRegistrationError(response.code(), errorBody);
+					Log.e(TAG, "Firebase Authentication failed", task.getException());
+					String errorMsg = task.getException() != null ? task.getException().getMessage() : "Failed to sign in";
+					Toast.makeText(this, errorMsg, Toast.LENGTH_LONG).show();
 				}
-			}
-
-			@Override
-			public void onFailure(@NonNull Call<GoogleSignInResponse> call, @NonNull Throwable t) {
-				Log.e(TAG, "Error registering Google user: " + t.getMessage(), t);
-			}
-		});
+			});
 	}
 
 	private void checkGoogleAccountExistsForRegistration(String email, String firstName, String lastName,
@@ -1255,95 +1242,49 @@ public class RegisterActivity extends AppCompatActivity {
 		// Default role to "customer" for regular registration
 		String role = "customer";
 
-		Log.d(TAG, "Creating account with - Email: " + email + ", Username: " + username + ", Role: " + role
+		Log.d(TAG, "Creating account with Firebase - Email: " + email + ", Username: " + username + ", Role: " + role
 				+ ", Location: " + location);
 
-		ApiService apiService = ApiClient.getApiService();
-		RegisterRequest request = new RegisterRequest(username, firstName, lastName, email, phone, location, password,
-				password, role);
-
-		Call<RegisterResponse> call = apiService.register(request);
-		call.enqueue(new Callback<>() {
-			@Override
-			public void onResponse(@NonNull Call<RegisterResponse> call, @NonNull Response<RegisterResponse> response) {
-				if (response.isSuccessful() && response.body() != null) {
-					RegisterResponse body = response.body();
-					if (body.isSuccess() && body.getData() != null) {
-						// Account created successfully
-						RegisterResponse.User user = body.getData().getUser();
-						String token = body.getData().getToken();
-
-						// Save user data and token
-						if (token != null) {
-							tokenManager.saveToken("Bearer " + token);
-						}
-						if (user != null) {
-							tokenManager.saveUserId(user.getId());
-						}
-						tokenManager.saveEmail(user != null ? user.getEmail() : email);
-
-						// Build and save name
-						if (user != null) {
-							String userFirstName = user.getFirstName();
-							String userLastName = user.getLastName();
-							StringBuilder nameBuilder = new StringBuilder();
-							if (userFirstName != null && !userFirstName.trim().isEmpty()) {
-								nameBuilder.append(userFirstName.trim());
-							}
-							if (userLastName != null && !userLastName.trim().isEmpty()) {
-								if (nameBuilder.length() > 0) {
-									nameBuilder.append(" ");
-								}
-								nameBuilder.append(userLastName.trim());
-							}
-							String fullName = nameBuilder.toString();
-							if (!fullName.isEmpty()) {
-								tokenManager.saveName(fullName);
-								Log.d(TAG, "Saved name to cache: " + fullName);
-							}
-						}
-
-						// Force immediate token persistence
-						tokenManager.forceCommit();
-
-						Log.d(TAG, "Account created successfully");
-						// Navigate to Account Created fragment
-						showAccountCreatedFragment();
-					} else {
-						// Registration failed
-						String errorMsg = body.getMessage() != null ? body.getMessage() : "Failed to create account";
-						Log.e(TAG, "Account creation failed: " + errorMsg);
-						Log.e(TAG, "Account creation failed (API error): " + errorMsg);
-					}
+		FirebaseAuthManager authManager = new FirebaseAuthManager(this);
+		authManager.createUserWithEmail(email, password)
+			.addOnCompleteListener(this, task -> {
+				if (task.isSuccessful()) {
+					Log.d(TAG, "Firebase Authentication successful");
+					
+					// Save to Firestore
+					java.util.Map<String, Object> userMap = new java.util.HashMap<>();
+					userMap.put("email", email);
+					userMap.put("firstName", firstName);
+					userMap.put("lastName", lastName);
+					userMap.put("username", username);
+					userMap.put("phone", phone);
+					userMap.put("location", location);
+					userMap.put("role", role);
+					userMap.put("fcm_token", "");
+					
+					com.google.firebase.firestore.FirebaseFirestore.getInstance()
+						.collection("users")
+						.document(task.getResult().getUser().getUid())
+						.set(userMap)
+						.addOnSuccessListener(aVoid -> {
+							Log.d(TAG, "Firestore user document created");
+							tokenManager.saveEmail(email);
+							tokenManager.saveRole(role);
+							tokenManager.saveName(firstName + " " + lastName);
+							tokenManager.forceCommit();
+							
+							showAccountCreatedFragment();
+						})
+						.addOnFailureListener(e -> {
+							Log.e(TAG, "Failed to save user to Firestore", e);
+							android.widget.Toast.makeText(this, "Failed to initialize profile. Please contact support.", android.widget.Toast.LENGTH_LONG).show();
+						});
 				} else {
-					// Response not successful
-					String errorMsg = "Failed to create account. Please try again.";
-					try {
-						if (response.errorBody() != null) {
-							com.google.gson.Gson gson = new com.google.gson.Gson();
-							java.io.BufferedReader reader = new java.io.BufferedReader(
-									new java.io.InputStreamReader(response.errorBody().byteStream()));
-							String errorJson = reader.readLine();
-							if (errorJson != null) {
-								RegisterResponse errorResponse = gson.fromJson(errorJson, RegisterResponse.class);
-								if (errorResponse != null && errorResponse.getMessage() != null) {
-									errorMsg = errorResponse.getMessage();
-								}
-							}
-						}
-					} catch (Exception e) {
-						Log.e(TAG, "Error parsing error response: " + e.getMessage(), e);
-					}
-					Log.e(TAG, "Account creation failed with status: " + response.code() + ", message: " + errorMsg);
-					Log.e(TAG, "Account creation failed: " + errorMsg);
+					Log.e(TAG, "Firebase Authentication failed", task.getException());
+					String errorMsg = task.getException() != null ? task.getException().getMessage() : "Failed to create account";
+					android.widget.Toast.makeText(this, errorMsg, android.widget.Toast.LENGTH_LONG).show();
 				}
-			}
-
-			@Override
-			public void onFailure(@NonNull Call<RegisterResponse> call, @NonNull Throwable t) {
-				Log.e(TAG, "Error creating account: " + t.getMessage(), t);
-			}
-		});
+			});
 	}
 
 	// Setters for registration data (called by fragments)

@@ -56,6 +56,7 @@ public class EmployeeProfileFragment extends Fragment {
     private long lastProfileFetchMs = 0L;
 
     private TokenManager tokenManager;
+    private app.hub.common.FirebaseAuthManager authManager;
     private TextView tvName;
     private TextView tvUsername;
     private TextView tvBranch;
@@ -83,6 +84,7 @@ public class EmployeeProfileFragment extends Fragment {
         }
 
         tokenManager = new TokenManager(getContext());
+        authManager = new app.hub.common.FirebaseAuthManager(getContext());
         UiPreferences.applyTheme(tokenManager.getThemePreference());
 
         // Appearance button
@@ -162,45 +164,42 @@ public class EmployeeProfileFragment extends Fragment {
     }
 
     private void loadProfile() {
-        String authToken = tokenManager.getAuthToken();
-        if (authToken == null) {
+        com.google.firebase.auth.FirebaseUser user = com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+        if (user == null) {
             return;
         }
 
         lastProfileFetchMs = System.currentTimeMillis();
 
-        ApiService apiService = ApiClient.getApiService();
-        Call<app.hub.api.UserResponse> call = apiService.getUser(authToken);
-        call.enqueue(new Callback<app.hub.api.UserResponse>() {
-            @Override
-            public void onResponse(@NonNull Call<app.hub.api.UserResponse> call,
-                    @NonNull Response<app.hub.api.UserResponse> response) {
-                if (!isAdded() || response.body() == null || !response.body().isSuccess()) {
+        com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users").document(user.getUid())
+            .get()
+            .addOnSuccessListener(documentSnapshot -> {
+                if (!isAdded() || !documentSnapshot.exists()) {
                     return;
                 }
 
-                app.hub.api.UserResponse.Data data = response.body().getData();
-                if (data == null) {
-                    return;
+                String firstName = documentSnapshot.getString("firstName");
+                String lastName = documentSnapshot.getString("lastName");
+                String name = documentSnapshot.getString("name");
+                if (name == null || name.trim().isEmpty()) {
+                    name = (firstName != null ? firstName : "") + " " + (lastName != null ? lastName : "");
+                    name = name.trim();
                 }
+
+                String email = documentSnapshot.getString("email");
+                String branch = documentSnapshot.getString("branch");
+                String profilePhoto = documentSnapshot.getString("profilePhoto");
 
                 if (tvName != null) {
-                    String name = data.getName();
-                    if (name == null || name.trim().isEmpty()) {
-                        String first = data.getFirstName() != null ? data.getFirstName() : "";
-                        String last = data.getLastName() != null ? data.getLastName() : "";
-                        name = (first + " " + last).trim();
-                    }
-                    tvName.setText(name != null && !name.isEmpty() ? name : "Unknown User");
+                    tvName.setText(!name.isEmpty() ? name : "Unknown User");
                 }
 
                 if (tvUsername != null) {
-                    String email = data.getEmail();
                     tvUsername.setText(email != null ? email : "No email");
                 }
 
                 if (tvBranch != null) {
-                    String branch = data.getBranch() != null ? data.getBranch() : tokenManager.getCachedBranch();
+                    branch = branch != null ? branch : tokenManager.getCachedBranch();
                     if (branch != null && !branch.isEmpty()) {
                         tvBranch.setText("Technician | " + branch);
                         tvBranch.setVisibility(View.VISIBLE);
@@ -210,16 +209,13 @@ public class EmployeeProfileFragment extends Fragment {
                     }
                 }
 
-                if (imgProfile != null && data.getProfilePhoto() != null && !data.getProfilePhoto().isEmpty()) {
-                    loadProfileImageFromUrl(data.getProfilePhoto());
+                if (imgProfile != null && profilePhoto != null && !profilePhoto.isEmpty()) {
+                    loadProfileImageFromUrl(profilePhoto);
                 }
-            }
-
-            @Override
-            public void onFailure(@NonNull Call<app.hub.api.UserResponse> call, @NonNull Throwable t) {
+            })
+            .addOnFailureListener(e -> {
                 // Keep UI stable on failure.
-            }
-        });
+            });
     }
 
     private boolean shouldRefreshProfile() {
@@ -508,54 +504,18 @@ public class EmployeeProfileFragment extends Fragment {
         // Clear user data immediately (this is the most important part)
         clearUserData();
 
-        String authToken = tokenManager.getAuthToken();
-        Log.d("EmployeeProfileFragment", "Token present: " + (authToken != null));
-
-        if (authToken != null) {
-            Log.d("EmployeeProfileFragment", "Making API logout call");
-            try {
-                ApiService apiService = ApiClient.getApiService();
-            Call<LogoutResponse> call = apiService.logout(authToken);
-                call.enqueue(new Callback<LogoutResponse>() {
-                    @Override
-                    public void onResponse(@NonNull Call<LogoutResponse> call, @NonNull Response<LogoutResponse> response) {
-                        Log.d("EmployeeProfileFragment", "API logout response received - Success: "
-                                + response.isSuccessful() + ", Code: " + response.code());
-                        
-                        // Dismiss loading dialog
-                        loadingDialog.dismiss();
-
-                        Log.d("EmployeeProfileFragment", "Performing final cleanup");
-                        // Perform remaining cleanup and navigate
-                        performFinalCleanup();
-                    }
-
-                    @Override
-                    public void onFailure(@NonNull Call<LogoutResponse> call, @NonNull Throwable t) {
-                        Log.w("EmployeeProfileFragment", "API logout failed: " + t.getMessage());
-                        
-                        // Dismiss loading dialog
-                        loadingDialog.dismiss();
-
-                        Log.d("EmployeeProfileFragment", "Performing final cleanup after API failure");
-                        // Still perform cleanup even if API call fails
-                        performFinalCleanup();
-                    }
-                });
-            } catch (Exception e) {
-                Log.e("EmployeeProfileFragment", "Error making logout API call: " + e.getMessage(), e);
-                loadingDialog.dismiss();
-                performFinalCleanup();
+        try {
+            if (authManager != null) {
+                authManager.signOut();
+            } else {
+                com.google.firebase.auth.FirebaseAuth.getInstance().signOut();
             }
-        } else {
-            Log.d("EmployeeProfileFragment", "No token, dismissing loading dialog");
-            // Dismiss loading dialog
-            loadingDialog.dismiss();
-
-            Log.d("EmployeeProfileFragment", "Performing final cleanup (no token)");
-            // No token, just perform final cleanup
-            performFinalCleanup();
+        } catch (Exception e) {
+            Log.e("EmployeeProfileFragment", "Error signing out of Firebase: " + e.getMessage());
         }
+
+        loadingDialog.dismiss();
+        performFinalCleanup();
     }
     
     private void dismissProgressDialog(android.app.ProgressDialog progressDialog) {

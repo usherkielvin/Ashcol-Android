@@ -236,7 +236,7 @@ public class FirestoreManager {
         // Firestore for easier querying from Android.
 
         ticketListener = db.collection("tickets")
-                .whereEqualTo("customerEmail", email)
+                .whereEqualTo("customer_email", email)
                 .addSnapshotListener(MetadataChanges.INCLUDE, (snapshots, error) -> {
                     if (error != null) {
                         listener.onError(error);

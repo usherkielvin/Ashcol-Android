@@ -148,41 +148,32 @@ public class ManagerAddEmployee extends AppCompatActivity {
     }
 
     private void loadManagerInfo() {
-        String token = tokenManager.getToken();
-        if (token == null) {
-            Toast.makeText(this, "Authentication error", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
-        }
-
-        // Load and display manager's branch (non-editable)
-        ApiService apiService = ApiClient.getApiService();
-        Call<UserResponse> call = apiService.getUser("Bearer " + token);
-
-        call.enqueue(new Callback<UserResponse>() {
-            @Override
-            public void onResponse(Call<UserResponse> call, Response<UserResponse> response) {
-                if (response.isSuccessful() && response.body() != null) {
-                    UserResponse userResponse = response.body();
-                    if (userResponse.isSuccess() && userResponse.getData() != null) {
-                        String managerBranch = userResponse.getData().getBranch();
-                        if (managerBranch != null && !managerBranch.isEmpty()) {
-                            // Display the manager's branch (non-editable)
-                            branchDisplay.setText(managerBranch);
-                            selectedBranch = managerBranch;
+        String branch = ManagerDataManager.getCachedBranchName();
+        if (branch != null) {
+            branchDisplay.setText(branch);
+            selectedBranch = branch;
+        } else {
+            com.google.firebase.auth.FirebaseUser user = com.google.firebase.auth.FirebaseAuth.getInstance().getCurrentUser();
+            if (user != null) {
+                com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users").document(user.getUid()).get()
+                    .addOnSuccessListener(snapshot -> {
+                        String b = snapshot.getString("branch");
+                        if (b != null && !b.isEmpty()) {
+                            branchDisplay.setText(b);
+                            selectedBranch = b;
                         } else {
                             branchDisplay.setText("No branch assigned");
                         }
-                    }
-                }
+                    })
+                    .addOnFailureListener(e -> {
+                        android.util.Log.w("ManagerAddEmployee", "Could not load manager branch: " + e.getMessage());
+                        branchDisplay.setText("Error loading branch");
+                    });
+            } else {
+                Toast.makeText(this, "Authentication error", Toast.LENGTH_SHORT).show();
+                finish();
             }
-
-            @Override
-            public void onFailure(Call<UserResponse> call, Throwable t) {
-                android.util.Log.w("ManagerAddEmployee", "Could not load manager branch: " + t.getMessage());
-                branchDisplay.setText("Error loading branch");
-            }
-        });
+        }
     }
 
     private void createEmployee() {
@@ -193,12 +184,7 @@ public class ManagerAddEmployee extends AppCompatActivity {
             String lastName = lastNameInput.getText().toString().trim();
             String email = emailInput.getText().toString().trim();
             String password = passwordInput.getText().toString().trim();
-            String confirmPassword = password; // Using same password field
 
-            android.util.Log.d("ManagerAddEmployee",
-                    "Form data collected - Role: " + selectedRole + ", Branch: " + selectedBranch);
-
-            // Validation
             if (firstName.isEmpty()) {
                 firstNameInput.setError("First name is required");
                 firstNameInput.requestFocus();
@@ -234,189 +220,65 @@ public class ManagerAddEmployee extends AppCompatActivity {
                 return;
             }
 
-            if (selectedBranch == null || selectedBranch.isEmpty()) {
-                Toast.makeText(this, "Please select a branch", Toast.LENGTH_SHORT).show();
+            if (selectedBranch == null || selectedBranch.isEmpty() || selectedBranch.equals("No branch assigned")) {
+                Toast.makeText(this, "Valid branch is required", Toast.LENGTH_SHORT).show();
                 return;
             }
-
-            android.util.Log.d("ManagerAddEmployee", "Validation passed - Role: " + selectedRole + ", Branch: " + selectedBranch);
 
             // Show loading dialog
             LoadingDialog loadingDialog = new LoadingDialog(this);
             loadingDialog.show();
 
-            // Create username from first name + last name
-            String username = (firstName.toLowerCase() + "." + lastName.toLowerCase()).replaceAll("\\s+", "");
-
-            // Create employee with selected role and branch
-            RegisterRequest registerRequest = new RegisterRequest(
-                    username, firstName, lastName, email, "", "",
-                    password, confirmPassword, selectedRole, selectedBranch);
-
-            android.util.Log.d("ManagerAddEmployee",
-                    "RegisterRequest created - Role: " + selectedRole + ", Branch: " + selectedBranch);
-
-            ApiService apiService = ApiClient.getApiService();
-            if (apiService == null) {
-                loadingDialog.dismiss();
-                android.util.Log.e("ManagerAddEmployee", "ApiService is null");
-                Toast.makeText(this, "API service error", Toast.LENGTH_SHORT).show();
-                return;
+            // Create a secondary Firebase instance so we don't log out the current Manager
+            com.google.firebase.FirebaseOptions options = com.google.firebase.FirebaseApp.getInstance().getOptions();
+            com.google.firebase.FirebaseApp secondaryApp;
+            try {
+                secondaryApp = com.google.firebase.FirebaseApp.getInstance("SecondaryApp");
+            } catch (IllegalStateException e) {
+                secondaryApp = com.google.firebase.FirebaseApp.initializeApp(getApplicationContext(), options, "SecondaryApp");
             }
 
-            Call<RegisterResponse> call = apiService.register(registerRequest);
-            if (call == null) {
-                loadingDialog.dismiss();
-                android.util.Log.e("ManagerAddEmployee", "API call is null");
-                Toast.makeText(this, "API call error", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            android.util.Log.d("ManagerAddEmployee", "Making API call to register employee");
-
-            call.enqueue(new Callback<RegisterResponse>() {
-                @Override
-                public void onResponse(Call<RegisterResponse> call, Response<RegisterResponse> response) {
+            com.google.firebase.auth.FirebaseAuth secondaryAuth = com.google.firebase.auth.FirebaseAuth.getInstance(secondaryApp);
+            
+            secondaryAuth.createUserWithEmailAndPassword(email, password)
+                .addOnSuccessListener(authResult -> {
+                    String newUid = authResult.getUser().getUid();
+                    java.util.Map<String, Object> userData = new java.util.HashMap<>();
+                    userData.put("uid", newUid);
+                    userData.put("email", email);
+                    userData.put("firstName", firstName);
+                    userData.put("lastName", lastName);
+                    userData.put("role", selectedRole);
+                    userData.put("branch", selectedBranch);
+                    userData.put("isApproved", true);
+                    userData.put("created_at", System.currentTimeMillis());
+                    
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users")
+                        .document(newUid).set(userData)
+                        .addOnSuccessListener(aVoid -> {
+                            loadingDialog.dismiss();
+                            ManagerDataManager.forceRefreshEmployees(ManagerAddEmployee.this, null);
+                            Toast.makeText(ManagerAddEmployee.this, "Technician created successfully", Toast.LENGTH_SHORT).show();
+                            
+                            // Sign out the secondary instance to clean up
+                            secondaryAuth.signOut();
+                            finish();
+                        })
+                        .addOnFailureListener(e -> {
+                            loadingDialog.dismiss();
+                            android.util.Log.e("ManagerAddEmployee", "Failed to create user doc", e);
+                            Toast.makeText(ManagerAddEmployee.this, "Failed to save user details: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        });
+                })
+                .addOnFailureListener(e -> {
                     loadingDialog.dismiss();
-                    try {
-                        android.util.Log.d("ManagerAddEmployee", "Response received - Code: " + response.code());
-                        android.util.Log.d("ManagerAddEmployee", "Response successful: " + response.isSuccessful());
-
-                        if (response.isSuccessful() && response.body() != null) {
-                            RegisterResponse registerResponse = response.body();
-                            android.util.Log.d("ManagerAddEmployee",
-                                    "Register response success: " + registerResponse.isSuccess());
-
-                            if (registerResponse.isSuccess()) {
-                                android.util.Log.d("ManagerAddEmployee", "Employee created successfully");
-
-                                // Clear employee cache to refresh the list
-                                try {
-                                    // Clear the centralized cache
-                                    ManagerDataManager.clearEmployeeCache();
-
-                                    // Also clear TokenManager cache for compatibility
-                                    if (tokenManager != null) {
-                                        tokenManager.clearBranchCache();
-                                    }
-
-                                    // Immediately trigger a refresh to load the new employee
-                                    // This will notify all listeners (including ManagerEmployeeFragment)
-                                    android.util.Log.d("ManagerAddEmployee", "Triggering immediate employee refresh");
-                                    ManagerDataManager.refreshEmployees(ManagerAddEmployee.this,
-                                            new ManagerDataManager.DataLoadCallback() {
-                                                @Override
-                                                public void onEmployeesLoaded(String branchName,
-                                                        List<EmployeeResponse.Employee> employees) {
-                                                    android.util.Log.d("ManagerAddEmployee",
-                                                            "Employees refreshed after creation: " + employees.size());
-                                                }
-
-                                                @Override
-                                                public void onTicketsLoaded(
-                                                        List<app.hub.api.TicketListResponse.TicketItem> tickets) {
-                                                }
-
-                                                @Override
-                                                public void onDashboardStatsLoaded(
-                                                        app.hub.api.DashboardStatsResponse.Stats stats,
-                                                        List<app.hub.api.DashboardStatsResponse.RecentTicket> recentTickets) {
-                                                }
-
-                                                @Override
-                                                public void onLoadComplete() {
-                                                    android.util.Log.d("ManagerAddEmployee",
-                                                            "Refresh complete, new employee should be visible");
-                                                }
-
-                                                @Override
-                                                public void onLoadError(String error) {
-                                                    android.util.Log.e("ManagerAddEmployee",
-                                                            "Error refreshing after creation: " + error);
-                                                }
-                                            });
-                                } catch (Exception e) {
-                                    android.util.Log.e("ManagerAddEmployee", "Error clearing cache", e);
-                                }
-
-                                Toast.makeText(ManagerAddEmployee.this,
-                                        selectedRole.substring(0, 1).toUpperCase() + selectedRole.substring(1) + 
-                                        " created successfully and assigned to " + selectedBranch,
-                                        Toast.LENGTH_LONG).show();
-
-                                // Use a delayed finish to ensure toast is shown and data is refreshed
-                                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                                    try {
-                                        android.util.Log.d("ManagerAddEmployee", "Attempting to finish activity");
-                                        if (!isFinishing() && !isDestroyed()) {
-                                            finish();
-                                            android.util.Log.d("ManagerAddEmployee", "Activity finished successfully");
-                                        } else {
-                                            android.util.Log.w("ManagerAddEmployee",
-                                                    "Activity already finishing or destroyed");
-                                        }
-                                    } catch (Exception e) {
-                                        android.util.Log.e("ManagerAddEmployee", "Error finishing activity", e);
-                                    }
-                                }, 1500); // Increased delay to 1.5 seconds
-
-                            } else {
-                                android.util.Log.e("ManagerAddEmployee", "Registration failed - success=false");
-                                String errorMessage = "Failed to create " + selectedRole;
-                                if (registerResponse.getErrors() != null) {
-                                    StringBuilder sb = new StringBuilder();
-                                    if (registerResponse.getErrors().getEmail() != null) {
-                                        sb.append("Email: ")
-                                                .append(String.join(", ", registerResponse.getErrors().getEmail()))
-                                                .append("\n");
-                                    }
-                                    if (registerResponse.getErrors().getUsername() != null) {
-                                        sb.append("Username: ")
-                                                .append(String.join(", ", registerResponse.getErrors().getUsername()))
-                                                .append("\n");
-                                    }
-                                    if (sb.length() > 0) {
-                                        errorMessage = sb.toString().trim();
-                                    }
-                                }
-                                Toast.makeText(ManagerAddEmployee.this, errorMessage, Toast.LENGTH_LONG).show();
-                            }
-                        } else {
-                            android.util.Log.e("ManagerAddEmployee", "Response not successful or body is null");
-                            if (response.errorBody() != null) {
-                                try {
-                                    String errorBody = response.errorBody().string();
-                                    android.util.Log.e("ManagerAddEmployee", "Error body: " + errorBody);
-                                } catch (Exception e) {
-                                    android.util.Log.e("ManagerAddEmployee", "Could not read error body", e);
-                                }
-                            }
-                                Toast.makeText(ManagerAddEmployee.this, "Failed to create " + selectedRole, Toast.LENGTH_SHORT)
-                                    .show();
-                        }
-                    } catch (Exception e) {
-                        android.util.Log.e("ManagerAddEmployee", "Exception in onResponse", e);
-                        Toast.makeText(ManagerAddEmployee.this, "Error processing response: " + e.getMessage(),
-                                Toast.LENGTH_SHORT).show();
-                    }
-                }
-
-                @Override
-                public void onFailure(Call<RegisterResponse> call, Throwable t) {
-                    loadingDialog.dismiss();
-                    try {
-                        android.util.Log.e("ManagerAddEmployee", "Network error", t);
-                        Toast.makeText(ManagerAddEmployee.this, "Network error: " + t.getMessage(), Toast.LENGTH_SHORT)
-                                .show();
-                    } catch (Exception e) {
-                        android.util.Log.e("ManagerAddEmployee", "Exception in onFailure", e);
-                    }
-                }
-            });
+                    android.util.Log.e("ManagerAddEmployee", "Failed to create employee", e);
+                    Toast.makeText(ManagerAddEmployee.this, "Registration failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
 
         } catch (Exception e) {
-            android.util.Log.e("ManagerAddEmployee", "Exception in createEmployee method", e);
-            Toast.makeText(this, "Error creating employee: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            android.util.Log.e("ManagerAddEmployee", "Exception in createEmployee", e);
+            Toast.makeText(this, "Error starting creation process", Toast.LENGTH_SHORT).show();
         }
     }
 }

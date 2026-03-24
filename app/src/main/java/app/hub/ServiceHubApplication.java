@@ -1,12 +1,27 @@
 package app.hub;
 
 import android.app.Application;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.FirebaseFirestoreSettings;
 import com.squareup.picasso.Picasso;
 
 public class ServiceHubApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        
+        // Initialize Firebase
+        FirebaseApp.initializeApp(this);
+        
+        // Enable Firestore offline persistence
+        FirebaseFirestore firestore = FirebaseFirestore.getInstance();
+        FirebaseFirestoreSettings settings = new FirebaseFirestoreSettings.Builder()
+                .setPersistenceEnabled(true)
+                .setCacheSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+                .build();
+        firestore.setFirestoreSettings(settings);
         
         // Enable Picasso logging for debugging image loading issues
         Picasso.Builder builder = new Picasso.Builder(this);

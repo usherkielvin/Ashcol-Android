@@ -1,479 +1,141 @@
-# Ashcol ServiceHub
+<p align="center">
+  <img src="app/src/main/res/drawable/ash.JPG" alt="Ashcol Logo" width="200"/>
+</p>
 
-## 👥 Development Team – Application Development Project
+<h1 align="center">Ashcol ServiceHub</h1>
+<p align="center">A mobile service management app for Ashcol Airconditioning Corporation</p>
 
-### 🎨 UI/UX Designer
-**Hans Gabrielee Borillo** – UI/UX Designer & Figma Specialist
-
-- User interface design in Figma
-- Mobile app mockups & prototypes
-- Design system & style guide
-- User experience research
-- Visual design & branding
-
-### 💻 Android Frontend Developer
-**Kenji A. Hizon** – Android XML Layout Developer
-
-- Android XML layout implementation
-- Material Design components
-- Responsive mobile layouts
-- UI component development
-- Frontend integration with backend APIs
-
-### 🔧 Backend Developer & Database Architect
-**Dizon S. Dizon** – Backend Developer
-
-- Laravel REST API development
-- Database design & optimization
-- API endpoint implementation
-- Server-side business logic
-- Data validation & security
-
-### 👨💻 Project Lead & Backend Developer
-**Usher Kielvin Ponce** – Project Lead & Backend Developer
-
-- Project coordination & leadership
-- Laravel REST API development
-- Database architecture
-- Firebase integration & real-time sync
-- Branch-based routing system
-- Server deployment & maintenance
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=flat&logo=android&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Language-Java-ED8B00?style=flat&logo=openjdk&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Firebase-Firestore-FFCA28?style=flat&logo=firebase&logoColor=black"/>
+  <img src="https://img.shields.io/badge/Firebase-Auth-FFCA28?style=flat&logo=firebase&logoColor=black"/>
+  <img src="https://img.shields.io/badge/Firebase-FCM-FFCA28?style=flat&logo=firebase&logoColor=black"/>
+  <img src="https://img.shields.io/badge/Firebase-Storage-FFCA28?style=flat&logo=firebase&logoColor=black"/>
+  <img src="https://img.shields.io/badge/Min%20SDK-24-blue?style=flat"/>
+</p>
 
 ---
 
-## 📚 Academic Project Details
+## Project Overview
 
-### Application Development Implementation
-This project demonstrates practical implementation of modern application development concepts for a real-world service management system.
+Ashcol ServiceHub is an Android application built for Ashcol Airconditioning Corporation to manage service requests, technician assignments, and branch operations. The app supports four user roles — Customer, Technician, Manager, and Admin — each with a dedicated dashboard and feature set.
 
-### Key Technologies & Frameworks
+The backend is powered entirely by Firebase (Firestore, Authentication, Cloud Functions, and Storage), enabling real-time data sync, push notifications, and secure file handling without a traditional server.
 
-#### Backend (Laravel 11)
-- **RESTful API** - Complete API for mobile-web communication
-- **Sanctum Authentication** - Token-based authentication system
-- **Eloquent ORM** - Database abstraction and relationships
-- **Firebase Firestore** - Real-time data synchronization
-- **Migration System** - Version-controlled database schema
+---
 
-#### Mobile (Android - Java)
-- **Retrofit 2** - Type-safe HTTP client for API communication
-- **Gson** - JSON serialization/deserialization
-- **Google Sign-In** - OAuth 2.0 authentication
-- **Firebase Cloud Messaging** - Push notifications
-- **SharedPreferences** - Local data persistence
-- **Material Design Components** - Modern UI/UX
+## Tech Stack
 
-#### Database
-- **MySQL** - Primary relational database
-- **Firebase Firestore** - Real-time NoSQL database for live updates
+| Layer | Technology |
+|---|---|
+| Mobile | Android (Java) |
+| UI | Material Design Components, XML Layouts |
+| Authentication | Firebase Authentication, Google Sign-In |
+| Database | Firebase Firestore (NoSQL, real-time) |
+| File Storage | Firebase Storage |
+| Push Notifications | Firebase Cloud Messaging (FCM) |
+| Backend Logic | Firebase Cloud Functions |
+| HTTP Client | Retrofit 2 + Gson |
+| Local Storage | SharedPreferences |
+| Build System | Gradle (Kotlin DSL) |
 
-### Key Features Implemented
+---
 
-#### 1. **Multi-Role Authentication System**
-- Customer, Technician, Manager, and Admin roles
-- Google OAuth integration
-- Email verification system
-- Password reset functionality
+## Features
 
-#### 2. **Service Ticket Management**
-- Create service requests with image attachments
-- Real-time status updates via Firebase
-- Branch-based automatic assignment
-- Priority queue management
+### Customer
+- Register via Email or Google
+- Create service requests with photo attachments
+- Track ticket status in real-time
+- View service history and receive push notifications
 
-#### 3. **Branch-Based Routing Algorithm**
-- Automatic branch assignment based on region/city
-- Region extraction from branch names
-- Fallback mechanisms for unassigned users
+### Technician
+- View and manage assigned tickets
+- Update ticket status and add comments
+- Filter tickets by status
 
-#### 4. **Real-Time Synchronization**
-- Firebase Firestore integration
-- Live ticket status updates
-- Instant assignment notifications
-- Manager dashboard real-time updates
+### Manager
+- View all branch tickets and assign to technicians
+- Monitor employee workload
+- Real-time dashboard and branch reports
 
-#### 5. **Profile Management**
-- Photo upload and storage
-- Auto-assignment of region/city from branch
-- FCM token registration for push notifications
+### Admin
+- Full user and branch management (CRUD)
+- System-wide analytics
+- Manage all tickets across branches
 
-### Application Architecture
+---
+
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                   Android Application                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │  Activities  │  │  Fragments   │  │   Adapters   │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-│         │                  │                  │          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │           API Service (Retrofit)                  │  │
-│  └──────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+│  Activities / Fragments / Adapters / ViewModels          │
+│                                                          │
+│  Repositories (UserRepository, TicketRepository, ...)    │
+└──────────────────────────┬──────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│                  Laravel REST API                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │ Controllers  │  │    Models    │  │  Middleware  │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-│         │                  │                  │          │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │              Database (MySQL)                     │  │
-│  └──────────────────────────────────────────────────┘  │
+│                      Firebase                            │
+│                                                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │
+│  │ Firestore   │  │    Auth     │  │ Cloud Functions │ │
+│  └─────────────┘  └─────────────┘  └─────────────────┘ │
+│  ┌─────────────┐  ┌─────────────┐                       │
+│  │   Storage   │  │     FCM     │                       │
+│  └─────────────┘  └─────────────┘                       │
 └─────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│              Firebase Firestore (Real-time)              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Tickets    │  │    Users     │  │  Branches    │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-### API Endpoints
-
-#### Authentication
-- `POST /api/v1/register` - User registration with branch auto-assignment
-- `POST /api/v1/login` - User login with token generation
-- `POST /api/v1/google-signin` - Google OAuth authentication
-- `POST /api/v1/google-register` - Google account registration
-
-#### User Management
-- `GET /api/v1/user` - Get authenticated user profile
-- `POST /api/v1/user/update` - Update user profile
-- `POST /api/v1/user/photo` - Upload profile photo
-- `POST /api/v1/change-password` - Change password
-- `POST /api/v1/fcm-token` - Register FCM token for notifications
-
-#### Ticket Management
-- `POST /api/v1/tickets` - Create service ticket
-- `GET /api/v1/tickets` - Get user tickets (role-based filtering)
-- `GET /api/v1/tickets/{id}` - Get ticket details
-- `PUT /api/v1/tickets/{id}` - Update ticket status
-- `POST /api/v1/tickets/{id}/assign` - Assign ticket to technician
-- `POST /api/v1/tickets/{id}/comments` - Add comment to ticket
-
-#### Manager & Admin
-- `GET /api/v1/manager/tickets` - Get branch tickets (managers)
-- `GET /api/v1/manager/employees` - Get branch employees
-- `GET /api/v1/admin/users` - Get all users (admin)
-- `DELETE /api/v1/admin/users/{id}` - Delete user (admin)
-
----
-
-## Database Schema
-
-### Users Table
-```sql
-- id (Primary Key)
-- username (Unique)
-- firstName
-- lastName
-- email (Unique)
-- password (Hashed)
-- role (customer, technician, manager, admin)
-- region (Auto-assigned from branch)
-- city (Auto-assigned from branch)
-- branch (Branch name)
-- phone
-- gender
-- birthdate
-- profile_photo
-- fcm_token (For push notifications)
-- email_verified_at
-- created_at, updated_at
-```
-
-### Tickets Table
-```sql
-- id (Primary Key)
-- ticket_id (Unique, e.g., TCK-001)
-- customer_id (Foreign Key → users)
-- assigned_staff_id (Foreign Key → users)
-- branch_id (Foreign Key → branches)
-- status_id (Foreign Key → ticket_statuses)
-- title
-- description
-- address
-- contact
-- service_type
-- amount
-- unit_type
-- preferred_date
-- scheduled_date
-- scheduled_time
-- image_path
-- attachment_url
-- created_at, updated_at
-```
-
-### Branches Table
-```sql
-- id (Primary Key)
-- name (e.g., ASHCOL Valenzuela)
-- location (Region, City format)
-- address
-- latitude, longitude
-- is_active
-- created_at, updated_at
-```
-
-### Ticket Statuses Table
-```sql
-- id (Primary Key)
-- name (Pending, Assigned, In Progress, Completed, Cancelled)
-- color (Hex color code)
-- is_default
-- created_at, updated_at
 ```
 
 ---
 
-## Setup Instructions
+## Project Structure
 
-### Android App Setup
+```
+app/src/main/java/app/hub/
+├── admin/          # Admin dashboard, branches, managers, employees
+├── api/            # Retrofit API models and service interfaces
+├── common/         # Shared activities, Firebase managers, auth
+├── customer/       # Customer dashboard, tickets, payments
+├── employee/       # Technician/employee views
+├── manager/        # Manager dashboard and branch operations
+├── models/         # Data models (User, Ticket, Branch, Payment)
+├── onboarding/     # Intro and onboarding screens
+└── repositories/   # Firebase data access layer
+```
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Ashcol_ServiceHub
-   ```
+---
 
-2. **Open in Android Studio**
-   - Open Android Studio
-   - Select "Open an Existing Project"
-   - Navigate to the project directory
+## Setup
 
-3. **Configure Google Sign-In** (Optional)
-   ```bash
-   # Get SHA-1 fingerprint
-   ./gradlew signingReport
-   ```
-   - Create OAuth 2.0 Client ID in Google Cloud Console
-   - Add package name: `app.hub`
-   - Add SHA-1 fingerprint
-   - Download and replace `google-services.json` in `app/` directory
-
-4. **Update API Base URL**
-   - Edit `ApiClient.java`
-   - Update `BASE_URL` to your Laravel backend URL
-
-5. **Build and Run**
+1. Clone the repo and open in Android Studio
+2. Add your `google-services.json` to the `app/` directory (from Firebase Console)
+3. Build and run:
    ```bash
    ./gradlew assembleDebug
    ```
 
-### Backend Setup (Laravel)
-
-1. **Install Dependencies**
-   ```bash
-   cd Ashcol_Web
-   composer install
-   npm install
-   ```
-
-2. **Environment Configuration**
-   ```bash
-   cp .env.example .env
-   php artisan key:generate
-   ```
-
-3. **Configure Database** (`.env`)
-   ```env
-   DB_CONNECTION=mysql
-   DB_HOST=127.0.0.1
-   DB_PORT=3306
-   DB_DATABASE=ashcol_db
-   DB_USERNAME=root
-   DB_PASSWORD=
-   ```
-
-4. **Run Migrations**
-   ```bash
-   php artisan migrate --seed
-   ```
-
-5. **Configure Firebase** (Optional for real-time features)
-   - Download service account JSON from Firebase Console
-   - Place in `storage/app/firebase/`
-   - Update `FIREBASE_CREDENTIALS` in `.env`
-
-6. **Start Development Server**
-   ```bash
-   php artisan serve
-   npm run dev
-   ```
-
----
-
-## Key Algorithms & Logic
-
-### 1. Branch Assignment Algorithm
-```java
-// Automatic branch assignment based on region/city
-String guessedBranch = Branch.guessFromRegionCity(region, city);
-
-// Extract region/city from branch name (reverse mapping)
-Map<String, String> regionCity = Branch.extractRegionCityFromBranch(branchName);
-```
-
-**Supported Regions:**
-- NCR (National Capital Region)
-- Central Luzon (Bulacan, Pampanga, etc.)
-- CALABARZON (Cavite, Laguna, Batangas, Rizal, Quezon)
-
-### 2. Ticket Queue Management
-- FIFO (First In, First Out) for pending tickets
-- Priority-based assignment for managers
-- Real-time status synchronization via Firebase
-
-### 3. Authentication Flow
-```
-User Login → Token Generation → Store in SharedPreferences
-         ↓
-    Validate Token → API Request with Bearer Token
-         ↓
-    Role-Based Access Control → Dashboard Routing
-```
-
-### 4. Real-Time Sync Algorithm
-```
-MySQL Update → Trigger Firestore Sync → Push to Mobile
-     ↓                                        ↓
-Persistent Storage              Real-time UI Update
-```
-
----
-
-## Project Scope
-
-**Course:** Application Development Final Project  
-**Institution:** NU MOA (National University - Mall of Asia)  
-**Objective:** Develop a complete mobile-web service management system  
-**Focus:** RESTful API, Real-time synchronization, Multi-role authentication
-
----
-
-## Features Showcase
-
-### Customer Features
-- ✅ Register with Google or Email
-- ✅ Create service requests with photos
-- ✅ Track ticket status in real-time
-- ✅ View service history
-- ✅ Receive push notifications
-
-### Technician Features
-- ✅ View assigned tickets
-- ✅ Update ticket status
-- ✅ Add comments and updates
-- ✅ Filter by status (Pending, In Progress, Completed)
-
-### Manager Features
-- ✅ View all branch tickets
-- ✅ Assign tickets to technicians
-- ✅ Monitor employee workload
-- ✅ Real-time dashboard updates
-- ✅ Generate reports
-
-### Admin Features
-- ✅ User management (CRUD)
-- ✅ Branch management
-- ✅ System-wide analytics
-- ✅ Delete users and tickets
-
----
-
-## Testing
-
-### Unit Tests
+For Google Sign-In, generate your SHA-1 and register it in the Firebase Console:
 ```bash
-# Laravel backend tests
-php artisan test
-
-# Android instrumented tests
-./gradlew connectedAndroidTest
+./gradlew signingReport
 ```
 
-### Manual Testing Checklist
-- [ ] User registration (Email & Google)
-- [ ] Login with different roles
-- [ ] Create service ticket with image
-- [ ] Assign ticket to technician
-- [ ] Update ticket status
-- [ ] Real-time dashboard updates
-- [ ] Push notifications
-- [ ] Profile photo upload
+---
+
+## Team
+
+| Role | Name |
+|---|---|
+| Project Lead & Backend | Usher Kielvin Ponce |
+| Android Frontend | Kenji A. Hizon |
+| UI/UX Designer | Hans Gabrielee Borillo |
+| Backend & Database | Dizon S. Dizon |
+
+**Institution:** NU MOA — Application Development Final Project
 
 ---
 
-## Error Handling
-
-The application includes comprehensive error handling:
-- Network errors with retry mechanisms
-- Authentication errors with token refresh
-- Validation errors with user-friendly messages
-- Server errors with fallback responses
-- Google Sign-In errors with detailed logging
-
----
-
-## Security Features
-
-- ✅ Password hashing (bcrypt)
-- ✅ Token-based authentication (Sanctum)
-- ✅ CSRF protection
-- ✅ SQL injection prevention (Eloquent ORM)
-- ✅ XSS protection
-- ✅ Role-based access control
-- ✅ File upload validation
-
----
-
-## Future Enhancements
-
-- [ ] Offline mode with local database sync
-- [ ] In-app chat between customer and technician
-- [ ] Payment integration
-- [ ] Service rating system
-- [ ] Advanced analytics dashboard
-- [ ] Multi-language support
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-## Acknowledgments
-
-- **NU MOA Faculty** - For guidance and support
-- **Ashcol Airconditioning Corporation** - For the real-world use case
-- **Google Firebase** - For real-time database services
-- **Laravel Community** - For excellent documentation
-
----
-
-## Contact
-
-**Project Lead:** Usher Kielvin Ponce  
-**Email:** [Your Email]  
-**GitHub:** [Your GitHub Profile]
-
----
-
-**Built with ❤️ by the NU MOA APPDEV Team**
+<p align="center">Built with ❤️ by the NU MOA APPDEV Team</p>
