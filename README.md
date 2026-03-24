@@ -36,7 +36,7 @@ The backend is powered entirely by Firebase (Firestore, Authentication, Cloud Fu
 | File Storage | Firebase Storage |
 | Push Notifications | Firebase Cloud Messaging (FCM) |
 | Backend Logic | Firebase Cloud Functions |
-| HTTP Client | Retrofit 2 + Gson |
+| Maps | Google Maps SDK, Play Services Location |
 | Local Storage | SharedPreferences |
 | Build System | Gradle (Kotlin DSL) |
 

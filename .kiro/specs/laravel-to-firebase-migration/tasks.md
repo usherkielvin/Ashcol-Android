@@ -221,7 +221,7 @@ This implementation plan migrates an Android service ticket management applicati
     - Add FCM permissions
     - _Requirements: 10.1_
 
-  - [~] 11.4 Write tests for FCM integration
+  - [x] 11.4 Write tests for FCM integration
     - Test token registration
     - Test notification handling
     - Test notification navigation
@@ -380,7 +380,7 @@ This implementation plan migrates an Android service ticket management applicati
     - Generate migration report with success/failure counts
     - _Requirements: 11.9, 11.10_
 
-  - [~] 19.7 Test migration script with sample data
+  - [-] 19.7 Test migration script with sample data
     - Run migration on test dataset
     - Verify data integrity in Firestore
     - Validate all relationships are preserved
