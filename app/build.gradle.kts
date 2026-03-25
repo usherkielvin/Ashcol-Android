@@ -12,7 +12,7 @@ android {
     defaultConfig {
         applicationId = "app.hub"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -104,7 +104,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation("org.mockito:mockito-core:5.8.0")
     testImplementation("org.robolectric:robolectric:4.11.1")
-    testImplementation("androidx.fragment:fragment-testing:1.6.2")
+    testImplementation("androidx.fragment:fragment-testing-manifest:1.6.2")
     testImplementation("androidx.constraintlayout:constraintlayout:2.2.0")
     // jqwik for property-based testing
     testImplementation("net.jqwik:jqwik:1.8.2")
